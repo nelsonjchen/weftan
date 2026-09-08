@@ -687,6 +687,16 @@ impl Pipeline {
         labels::place_edge_labels(&mut self.graph);
     }
 
+    pub(super) fn run_nudge_edge_channels(&mut self) {
+        routing::nudge_edge_channels(&mut self.graph);
+        self.trace_route_stage("NudgeEdgeChannels");
+    }
+
+    pub(super) fn run_shortcut_edge_routes(&mut self) {
+        routing::shortcut_edge_routes(&mut self.graph);
+        self.trace_route_stage("ShortcutEdgeRoutes");
+    }
+
     pub(super) fn run_normalize(&mut self) {
         self.graph.normalize();
     }

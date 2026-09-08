@@ -604,6 +604,10 @@ pub fn layout_snapshot(input: &Graph, seed: i64, stage: LayoutStage) -> LayoutSn
         pipeline.trace_node_stage("SecondBinPack");
         pipeline.run_place_labels();
         pipeline.trace_node_stage("PlaceLabels");
+        pipeline.run_nudge_edge_channels();
+        pipeline.trace_node_stage("NudgeEdgeChannels");
+        pipeline.run_shortcut_edge_routes();
+        pipeline.trace_node_stage("ShortcutEdgeRoutes");
     }
     if requested_stage == LayoutStage::Normalize {
         pipeline.run_normalize();

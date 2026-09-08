@@ -181,7 +181,11 @@ pub(super) fn edge_label_top_left(
     route_label_top_left(&edge.points, position, percentage, width, height, 3.0)
 }
 
-fn label_rect(edge: &ArenaEdge, position: LabelPosition, percentage: f64) -> Option<Rect> {
+pub(super) fn label_rect(
+    edge: &ArenaEdge,
+    position: LabelPosition,
+    percentage: f64,
+) -> Option<Rect> {
     let label = edge.label.as_ref()?;
     Some(Rect {
         origin: edge_label_top_left(

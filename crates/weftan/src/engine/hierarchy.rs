@@ -271,6 +271,9 @@ impl Pipeline {
     /// initiate attempts; connectivity and the container-affecting
     /// transaction continue to observe the complete graph.
     pub(super) fn gap_normalization_stage(&mut self) -> bool {
+        if self.graph.is_uniform_flat_path() {
+            return false;
+        }
         let containers = self.graph.container_reverse_dfs_order();
         if std::env::var("WEFTAN_TRACE_GAP_CALL").is_ok() {
             eprintln!(

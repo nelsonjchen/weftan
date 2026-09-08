@@ -2850,6 +2850,12 @@ impl ArenaGraph {
             }
         }
         let mut total = 0.0;
+        // Current OSS TALA adds a small flow-continuity preference to sized
+        // edge length. It is evaluated from the same live endpoint slice as
+        // the ordinary edge terms, so compute it before consuming that slice
+        // in the main distance fold.
+        let flow_continuity =
+            self.flow_continuity_cost(node, &active_edges, restored_endpoints.as_deref());
         for (edge_index, edge_id) in active_edges.into_iter().enumerate() {
             let adjacent = self.active_adjacent(node, edge_id);
             let restored = restored_endpoint(edge_index);
@@ -3220,17 +3226,168 @@ impl ArenaGraph {
         }
         total += self.herd_penalty(node);
         total += self.common_uncle_penalty(node, true);
+        total += flow_continuity;
         if trace_sized_detail {
             eprintln!(
-                "SIZED_DETAIL_RUST_TOTAL node={} total={} herd={} commonUncle={} nears={}",
+                "SIZED_DETAIL_RUST_TOTAL node={} total={} herd={} commonUncle={} flow={} nears={}",
                 self.nodes[node.0 as usize].tala_id,
                 total,
                 self.herd_penalty(node),
                 self.common_uncle_penalty(node, true),
+                flow_continuity,
                 near_count,
             );
         }
         total
+    }
+
+    /// Current OSS TALA's experimental flow-continuity placement preference.
+    ///
+    /// An incoming and outgoing ray through a node should form a recognizable
+    /// continuation, while same-role branches should leave enough angular
+    /// room. The completed-layout score is unchanged; this only participates
+    /// in sized candidate placement and therefore must use the live candidate
+    /// geometry on every call.
+    fn flow_continuity_cost(
+        &self,
+        node: NodeId,
+        active_edges: &[EdgeId],
+        restored_endpoints: Option<&[SizedRestoredEndpoints]>,
+    ) -> f64 {
+        let node_ref = &self.nodes[node.0 as usize];
+        if self.position(node).is_none()
+            || active_edges.len() < 2
+            || active_edges.len() > 8
+            || node_ref.cluster.is_some()
+            || node_ref.sequence.is_some()
+            || node_ref.herd_assignment.is_some()
+            || self
+                .containers
+                .get(&Some(node))
+                .is_some_and(|children| !children.is_empty())
+        {
+            return 0.0;
+        }
+
+        const INCOMING: u8 = 1;
+        const OUTGOING: u8 = 2;
+        #[derive(Clone, Copy)]
+        struct Ray {
+            identity: u64,
+            x: f64,
+            y: f64,
+            directions: u8,
+        }
+
+        let node_position = self.active_node_position(node).unwrap();
+        let node_size = self.active_node_size(node);
+        let node_center = Point {
+            x: node_position.x + node_size.width / 2.0,
+            y: node_position.y + node_size.height / 2.0,
+        };
+        let node_container = self
+            .active_node_container(node)
+            .map(|container| self.nodes[container.0 as usize].tala_id);
+        let mut rays: Vec<Ray> = Vec::with_capacity(active_edges.len());
+
+        for (edge_index, edge_id) in active_edges.iter().copied().enumerate() {
+            let edge = &self.edges[edge_id.0 as usize];
+            if edge.is_invisible()
+                || edge.from == edge.to
+                || edge.has_table_column()
+                || edge.source_arrow == edge.target_arrow
+            {
+                continue;
+            }
+            let restored = restored_endpoints
+                .and_then(|endpoints| endpoints.get(edge_index))
+                .copied()
+                .unwrap_or_default();
+            // OSS flowContinuityCost ignores an edge whose receiver endpoint
+            // was replaced by an abducted original node (s.nRepl[i] != node).
+            if restored.node.is_some() {
+                continue;
+            }
+            let adjacent = self.active_adjacent(node, edge_id);
+            let adjacent_box = if let Some(projected) = restored.adjacent {
+                let Some(projected_box) = self.sized_projected_box(projected) else {
+                    continue;
+                };
+                projected_box
+            } else {
+                let Some(position) = self.active_node_position(adjacent) else {
+                    continue;
+                };
+                (position, self.active_node_size(adjacent))
+            };
+            let adjacent_container = restored
+                .adjacent
+                .and_then(|projected| projected.container_tala_id)
+                .or_else(|| {
+                    self.active_node_container(adjacent)
+                        .map(|container| self.nodes[container.0 as usize].tala_id)
+                });
+            if adjacent_container != node_container {
+                continue;
+            }
+            let adjacent_center = Point {
+                x: adjacent_box.0.x + adjacent_box.1.width / 2.0,
+                y: adjacent_box.0.y + adjacent_box.1.height / 2.0,
+            };
+            let dx = adjacent_center.x - node_center.x;
+            let dy = adjacent_center.y - node_center.y;
+            let length = dx.hypot(dy);
+            if length == 0.0 {
+                continue;
+            }
+            let incoming = if self.active_aggregate_owner(edge.to) == node {
+                !edge.source_arrow
+            } else {
+                edge.source_arrow
+            };
+            let directions = if incoming { INCOMING } else { OUTGOING };
+            let identity = restored
+                .adjacent
+                .map(|projected| projected.tala_id)
+                .unwrap_or(self.nodes[adjacent.0 as usize].tala_id);
+            if let Some(existing) = rays.iter_mut().find(|ray| ray.identity == identity) {
+                existing.directions |= directions;
+            } else {
+                rays.push(Ray {
+                    identity,
+                    x: dx / length,
+                    y: dy / length,
+                    directions,
+                });
+            }
+        }
+
+        let mut spine = f64::INFINITY;
+        let mut branch_sum: f64 = 0.0;
+        let mut branches = 0usize;
+        for first in 0..rays.len() {
+            for second in first + 1..rays.len() {
+                let dot = (rays[first].x * rays[second].x + rays[first].y * rays[second].y)
+                    .clamp(-1.0, 1.0);
+                let first_directions = rays[first].directions;
+                let second_directions = rays[second].directions;
+                if (first_directions & INCOMING != 0 && second_directions & OUTGOING != 0)
+                    || (first_directions & OUTGOING != 0 && second_directions & INCOMING != 0)
+                {
+                    spine = spine.min(1.0 + dot);
+                }
+                if first_directions & second_directions != 0 {
+                    branch_sum += (2.0 * dot - 1.0).max(0.0);
+                    branches += 1;
+                }
+            }
+        }
+
+        let mut cost = if spine.is_finite() { spine } else { 0.0 };
+        if branches > 0 {
+            cost += branch_sum / branches as f64;
+        }
+        self.turn_cost * cost
     }
 
     pub(super) fn sized_is_mirrored(

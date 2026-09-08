@@ -643,6 +643,9 @@ impl ArenaGraph {
     }
 
     pub(super) fn equidistance(&mut self) -> bool {
+        if self.is_uniform_flat_path() {
+            return false;
+        }
         if crate::engine::trace_env_enabled("WEFTAN_TRACE_EQ_GRAPH_POS") {
             for target_tala_id in [
                 1472025070_u64,
@@ -710,5 +713,48 @@ impl ArenaGraph {
             }
         }
         moved_horizontally || moved_vertically
+    }
+
+    /// Equidistance's midpoint pass is already satisfied by the regular
+    /// single-lane path produced by the recovered placement stages. Keeping
+    /// that fixed point avoids feeding rounding noise back through later
+    /// repeated passes when widths differ by one pixel.
+    pub(super) fn is_uniform_flat_path(&self) -> bool {
+        if self.nodes.len() < 3
+            || self.edges.len() + 1 != self.nodes.len()
+            || self.nodes.iter().any(|node| {
+                node.is_container
+                    || node.position.is_none()
+                    || node.fixed_top_left.is_some()
+                    || node.edges.len() > 2
+            })
+        {
+            return false;
+        }
+        let mut ordered = self
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| (NodeId(index as u32), node.position.unwrap(), node.rect.size))
+            .collect::<Vec<_>>();
+        ordered.sort_by(|left, right| {
+            left.1
+                .x
+                .total_cmp(&right.1.x)
+                .then_with(|| left.1.y.total_cmp(&right.1.y))
+        });
+        if ordered
+            .windows(2)
+            .any(|pair| (pair[0].1.y - pair[1].1.y).abs() > 1e-6)
+        {
+            return false;
+        }
+        let mut connected = 0usize;
+        for edge in &self.edges {
+            if edge.from != edge.to {
+                connected += 1;
+            }
+        }
+        connected == self.nodes.len() - 1
     }
 }
