@@ -1,65 +1,41 @@
 {
-  "schema": 2,
-  "measured_at": "2026-08-18",
-  "engine_commit": "b20d07cb035da3661ba8090e86d65cca20351c2b",
+  "schema": 3,
+  "measured_at": "2026-09-08",
   "oracle": {
-    "name": "TALA",
-    "version": "v0.4.3",
+    "name": "D2 bundled TALA",
+    "version": "v0.9.0",
+    "source_commit": "d5a51743b6d5c00f1ec6f8340003f5d5a6ba4eda",
+    "go_version": "go1.27.0",
     "platform": "macos-arm64"
   },
   "candidate": {
     "name": "Weftan",
-    "platform": "macos-arm64",
-    "profile": "oracle"
+    "branch": "codex/oss-tala-parity"
   },
   "corpus": {
-    "input_cases": 121
+    "input_cases": 121,
+    "seed": 1,
+    "dev_mode": true,
+    "jobs": 8,
+    "timeout_seconds": 60,
+    "successful_cases": 116,
+    "exact_cases": 108,
+    "error_cases": 5,
+    "boxes": {"exact": 2117, "total": 2196},
+    "routes": {"exact": 729, "total": 808},
+    "edge_labels": {"exact": 798, "total": 808},
+    "node_labels": {"exact": 2190, "total": 2196},
+    "node_icons": {"exact": 2196, "total": 2196}
   },
-  "isolated_seeds": {
-    "seeds": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-    "attempted_comparisons": 1210,
-    "successful_comparisons": 1200,
-    "exact_comparisons": 1200,
-    "error_comparisons": 10,
-    "boxes": { "exact": 29640, "total": 29640 },
-    "node_labels": { "exact": 29640, "total": 29640 },
-    "node_icons": { "exact": 29640, "total": 29640 },
-    "routes": { "exact": 9740, "total": 9740 },
-    "edge_labels": { "exact": 9740, "total": 9740 },
-    "errors": [
-      {
-        "case": "d2_e2e_expanded__e2etests_testdata_files_grid_large_checkered.graph.bin",
-        "seeds": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        "tala": "Timed out: Autolayout",
-        "weftan": "Timed out for seeds 3 through 8; completed for seeds 1, 2, 9, and 10"
-      }
-    ],
-    "command": "uv run --no-project python scripts/compare-tala-corpus.py CORPUS D2PLUGIN_TALA target/oracle/d2plugin-weftan --seeds 1-10 --jobs 8 --timeout 120 --summary-only"
-  },
-  "race_seeds": {
-    "seeds": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-    "attempted_cases": 121,
-    "successful_cases": 113,
-    "exact_cases": 113,
-    "geometry_mismatch_cases": 0,
-    "error_cases": 8,
-    "error_category": "reference_timeouts",
-    "error_note": "All eight errors were timeouts in the TALA reference executable during the recorded concurrent run; none was a successful geometry mismatch.",
-    "errors": [
-      "d2_doc_example__docs_examples_japan-grid_japan.graph.bin",
-      "d2_e2e__e2etests_testdata_files_arrowhead_scaling.graph.bin",
+  "trace_witnesses": {
+    "identical": [
+      "crates/weftan-d2/tests/fixtures/simple.json",
       "d2_e2e__e2etests_testdata_files_label_positions.graph.bin",
-      "d2_e2e_expanded__e2etests_testdata_files_grid_label_positions.graph.bin",
-      "d2_e2e_expanded__e2etests_testdata_files_grid_large_checkered.graph.bin",
-      "d2_e2e_expanded__e2etests_testdata_files_grid_oom.graph.bin",
-      "d2_e2e_expanded__e2etests_testdata_files_nesting_power.graph.bin",
-      "d2_example__fixtures_layout_d2_examples_japan_grid.graph.bin"
+      "d2_e2e_expanded__e2etests_testdata_files_icon_positions.graph.bin",
+      "d2_e2e__e2etests_testdata_files_all_shapes_link.graph.bin",
+      "d2_example__fixtures_layout_d2_examples_flipt_input.graph.bin"
     ],
-    "command": "uv run --no-project python scripts/compare-tala-race.py CORPUS D2PLUGIN_TALA target/oracle/d2plugin-weftan --seeds 1-10 --jobs 8 --timeout 180 --mismatches-only"
+    "first_remaining_divergence": null
   },
-  "interpretation": [
-    "Exact means boxes, node label and icon positions, routes, and edge label placement all matched.",
-    "Errors are excluded from exactness denominators and remain visible as errors.",
-    "This is a corpus measurement, not a universal equivalence claim."
-  ]
+  "interpretation": "Diagnostic baseline only; not a claim of universal equivalence or release readiness."
 }

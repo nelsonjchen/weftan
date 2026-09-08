@@ -296,6 +296,7 @@ mod tests {
             AlignmentVertical::Top,
             AlignmentHorizontal::Left,
             &BTreeSet::new(),
+            None,
         );
 
         assert_eq!(nodes[0].placement, 1);
@@ -313,6 +314,7 @@ mod tests {
             AlignmentVertical::Bottom,
             AlignmentHorizontal::Left,
             &BTreeSet::new(),
+            None,
         );
         assert_eq!(bottom_up[0].placement, 0);
         assert_eq!(bottom_up[1].placement, 1);
@@ -965,6 +967,7 @@ impl HierarchyPlacement {
         vertical: AlignmentVertical,
         horizontal: AlignmentHorizontal,
         conflicts: &BTreeSet<(usize, usize)>,
+        graph: Option<&ArenaGraph>,
     ) {
         nodes.sort_by_key(|node| {
             let level = self.nodes[node.placement].level;
@@ -1010,6 +1013,7 @@ impl HierarchyPlacement {
                 vertical,
                 horizontal,
                 &placement_to_alignment,
+                graph,
             );
             previous = Some(index);
         }
@@ -1122,7 +1126,7 @@ impl HierarchyPlacement {
         let mut narrowest = (f64::INFINITY, 0usize, 0.0, 0.0);
         for (run, (vertical, horizontal)) in directions.into_iter().enumerate() {
             let mut nodes = self.alignment_leaves(graph);
-            self.vertical_align(&mut nodes, vertical, horizontal, &conflicts);
+            self.vertical_align(&mut nodes, vertical, horizontal, &conflicts, Some(graph));
             self.horizontal_compact(&mut nodes, horizontal);
             let min = nodes
                 .iter()
@@ -1209,11 +1213,10 @@ impl HierarchyPlacement {
                 let median = if values.len() & 1 == 1 {
                     values[middle]
                 } else {
-                    // TALA's recovered helper computes both even-case
-                    // indexes as `len/2 - 1`, so its nominal average is the
-                    // lower middle value rather than the conventional mean
-                    // of the two middle values.
-                    values[middle - 1]
+                    // TALA averages the two middle coordinates. Keep the
+                    // division on each operand to match Go's float64
+                    // arithmetic before the final Math.Round.
+                    values[middle - 1] / 2.0 + values[middle] / 2.0
                 };
                 Some((node, median.round()))
             })
@@ -1403,6 +1406,25 @@ impl HierarchyPlacement {
             orders.push(self.order_state(HierarchyOrderStage::AfterGlobalSifting));
         }
         self.place_nodes_by_level(graph);
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_HIER_DETAIL") {
+            eprint!("HIER_DETAIL_RUST after-level");
+            for node in &self.nodes {
+                if let Some(graph_node) = node.graph_node
+                    && let Some(position) = graph.position(graph_node)
+                {
+                    let item = &graph.nodes[graph_node.0 as usize];
+                    eprint!(
+                        " {}@{:.0},{:.0}:{:.0}x{:.0}",
+                        item.tala_id,
+                        position.x,
+                        position.y,
+                        item.rect.size.width,
+                        item.rect.size.height
+                    );
+                }
+            }
+            eprintln!();
+        }
         let x = self.aligned_x_coordinates_internal(graph, alignments);
         let mut points = self
             .nodes
@@ -1416,6 +1438,21 @@ impl HierarchyPlacement {
             if let Some(point) = points.get_mut(&node) {
                 point.x = x;
             }
+        }
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_HIER_DETAIL") {
+            eprint!("HIER_DETAIL_RUST after-align");
+            for (node, position) in &points {
+                let item = &graph.nodes[node.0 as usize];
+                eprint!(
+                    " {}@{:.0},{:.0}:{:.0}x{:.0}",
+                    item.tala_id,
+                    position.x,
+                    position.y,
+                    item.rect.size.width,
+                    item.rect.size.height
+                );
+            }
+            eprintln!();
         }
         points
     }
@@ -1453,6 +1490,7 @@ impl HierarchyPlacement {
         vertical: AlignmentVertical,
         horizontal: AlignmentHorizontal,
         alignment: &BTreeMap<usize, usize>,
+        graph: Option<&ArenaGraph>,
     ) -> Vec<usize> {
         let node = &self.nodes[placement];
         let adjacent = match vertical {
@@ -1476,7 +1514,23 @@ impl HierarchyPlacement {
                     .map(|index| (*candidate, index))
             })
             .collect::<Vec<_>>();
-        result.sort_by_key(|(candidate, _)| self.nodes[*candidate].rank);
+        result.sort_by(|(left, _), (right, _)| {
+            let left_x = graph
+                .and_then(|graph| {
+                    self.nodes[*left]
+                        .graph_node
+                        .and_then(|node| graph.position(node))
+                })
+                .map_or(self.nodes[*left].rank as f64, |position| position.x);
+            let right_x = graph
+                .and_then(|graph| {
+                    self.nodes[*right]
+                        .graph_node
+                        .and_then(|node| graph.position(node))
+                })
+                .map_or(self.nodes[*right].rank as f64, |position| position.x);
+            left_x.total_cmp(&right_x)
+        });
         let result = result
             .into_iter()
             .map(|(_, index)| index)

@@ -1976,49 +1976,47 @@ impl Pipeline {
             }
             eprintln!();
         }
-        // AddHubs runs after AddSequences/AddClusters have replaced their
-        // members with vessels, but before placeNodes abducts descendant edges
-        // onto direct-child carriers. Reconstruct that exact topology: every
-        // edge contributes to the degree of a direct child or aggregate
-        // vessel, while only same-scope endpoints can become hub neighbors.
-        let mut hub_degrees = BTreeMap::<NodeId, usize>::new();
-        let mut hub_adjacency = BTreeMap::<NodeId, Vec<NodeId>>::new();
-        for edge_id in self.graph.edge_order.iter().copied() {
-            let edge = self
-                .input
-                .edges()
-                .nth(edge_id.0 as usize)
-                .expect("arena edge order references an input edge")
-                .1;
-            let source = scope_owner.get(&edge.source).copied();
-            let target = scope_owner.get(&edge.target).copied();
-            if let Some(source) = source {
-                *hub_degrees.entry(source).or_default() += 1;
-            }
-            if let Some(target) = target {
-                *hub_degrees.entry(target).or_default() += 1;
-            }
-            if let (Some(source), Some(target)) = (source, target) {
-                hub_adjacency.entry(source).or_default().push(target);
-                hub_adjacency.entry(target).or_default().push(source);
-            }
-        }
-        let hubs = scope_children
+        // AddHubs runs once on the owning graph and SplitSubgraphs carries
+        // that pointer map into every temporary graph. Recomputing hubs from
+        // a projected scope changes degrees after edge abduction and causes
+        // Rust to consume the hub-retry RNG path for nodes that Go never
+        // retries. Remap the already recovered map through this scope's
+        // dense IDs instead.
+        let hubs: BTreeMap<NodeId, Vec<NodeId>> = self
+            .graph
+            .hubs
             .iter()
-            .copied()
-            .filter_map(|hub| {
-                let mut has_connected = false;
-                let mut spokes = Vec::new();
-                for adjacent in hub_adjacency.get(&hub).into_iter().flatten() {
-                    if hub_degrees.get(adjacent).copied() == Some(1) {
-                        spokes.push(old_to_new[adjacent]);
-                    } else {
-                        has_connected = true;
-                    }
-                }
-                (has_connected && !spokes.is_empty()).then_some((old_to_new[&hub], spokes))
+            .filter_map(|(old_hub, old_spokes)| {
+                let hub = old_to_new.get(old_hub).copied()?;
+                let spokes = old_spokes
+                    .iter()
+                    .filter_map(|spoke| old_to_new.get(spoke).copied())
+                    .collect::<Vec<_>>();
+                (!spokes.is_empty()).then_some((hub, spokes))
             })
             .collect();
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_HUB_SCOPE") {
+            eprint!(
+                "HUB_SCOPE_RUST scope={:?} source=",
+                scope.map(|id| self.graph.nodes[id.0 as usize].tala_id)
+            );
+            for (hub, spokes) in &self.graph.hubs {
+                eprint!(" {}=[", self.graph.active_node_tala_id(*hub));
+                for spoke in spokes {
+                    eprint!(" {}", self.graph.active_node_tala_id(*spoke));
+                }
+                eprint!("]");
+            }
+            eprint!(" remapped=");
+            for (hub, spokes) in &hubs {
+                eprint!(" {}=[", hub.0);
+                for spoke in spokes {
+                    eprint!(" {}", spoke.0);
+                }
+                eprint!("]");
+            }
+            eprintln!();
+        }
         let scope_contains_ancestor = |candidate: NodeId| {
             let mut current_scope = scope;
             while let Some(scope_node) = current_scope {
@@ -2808,6 +2806,65 @@ impl Pipeline {
     }
 
     pub(super) fn publish_induced_external_geometry(owner: &mut ArenaGraph, placed: &ArenaGraph) {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_INDUCED_GEOMETRY") {
+            eprintln!(
+                "INDUCED_GEOMETRY_RUST placed_nodes={:?} placed_external={:?} placed_children={:?} placed_aggregate={:?}",
+                placed
+                    .nodes
+                    .iter()
+                    .filter(|node| matches!(
+                        node.tala_id,
+                        3447521236 | 5577006791947779410 | 1445424226 | 2895098185
+                    ))
+                    .map(|node| (node.tala_id, node.position, node.rect.size))
+                    .collect::<Vec<_>>(),
+                placed
+                    .transaction_external_containers
+                    .iter()
+                    .filter(|node| matches!(
+                        node.tala_id,
+                        3447521236 | 5577006791947779410 | 1445424226 | 2895098185
+                    ))
+                    .map(|node| (node.tala_id, node.position, node.rect.size))
+                    .collect::<Vec<_>>(),
+                placed
+                    .transaction_external_container_children
+                    .iter()
+                    .flat_map(
+                        |(parent, children)| children.iter().filter_map(move |child| {
+                            matches!(
+                                child.tala_id,
+                                3447521236 | 5577006791947779410 | 1445424226 | 2895098185
+                            )
+                            .then_some((
+                                *parent,
+                                child.tala_id,
+                                child.position,
+                                child.rect.size,
+                            ))
+                        })
+                    )
+                    .collect::<Vec<_>>(),
+                placed
+                    .transaction_external_aggregate_children
+                    .iter()
+                    .flat_map(
+                        |(parent, children)| children.iter().filter_map(move |child| {
+                            matches!(
+                                child.tala_id,
+                                3447521236 | 5577006791947779410 | 1445424226 | 2895098185
+                            )
+                            .then_some((
+                                *parent,
+                                child.tala_id,
+                                child.position,
+                                child.rect.size,
+                            ))
+                        })
+                    )
+                    .collect::<Vec<_>>()
+            );
+        }
         // TALA's induced graph shares the owning graph's node pointers.
         // Publish container boxes refitted through its hidden Containers map
         // before copying the component's visible Graph.Nodes back.
@@ -3328,6 +3385,23 @@ impl Pipeline {
                 );
             }
             sub_scope.run_initialize_nodes();
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_SCOPE_POS")
+                && placement
+                    .scoring_node_metadata
+                    .first()
+                    .and_then(|metadata| metadata.parent_tala_id)
+                    == Some(2_367_942_975)
+            {
+                eprintln!(
+                    "SCOPE_POS_RUST phase=after-initialize {:?}",
+                    sub_scope
+                        .graph
+                        .nodes
+                        .iter()
+                        .map(|node| (node.tala_id, node.position, node.rect.size))
+                        .collect::<Vec<_>>()
+                );
+            }
             if crate::engine::trace_env_enabled("WEFTAN_TRACE_GRID_ROOT_PHASES")
                 && sub_scope
                     .graph
@@ -3399,6 +3473,23 @@ impl Pipeline {
                 );
             }
             sub_scope.graph.initialize_transaction_projected_positions();
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_SCOPE_POS")
+                && placement
+                    .scoring_node_metadata
+                    .first()
+                    .and_then(|metadata| metadata.parent_tala_id)
+                    == Some(2_367_942_975)
+            {
+                eprintln!(
+                    "SCOPE_POS_RUST phase=after-projected-init {:?}",
+                    sub_scope
+                        .graph
+                        .nodes
+                        .iter()
+                        .map(|node| (node.tala_id, node.position, node.rect.size))
+                        .collect::<Vec<_>>()
+                );
+            }
             if crate::engine::trace_env_enabled("WEFTAN_TRACE_GRID28_STEPS")
                 && members.iter().any(|node| {
                     matches!(
@@ -3469,6 +3560,23 @@ impl Pipeline {
                 );
             }
             sub_scope.graph.sync_nested_projected_container_children();
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_SCOPE_POS")
+                && placement
+                    .scoring_node_metadata
+                    .first()
+                    .and_then(|metadata| metadata.parent_tala_id)
+                    == Some(2_367_942_975)
+            {
+                eprintln!(
+                    "SCOPE_POS_RUST phase=after-sync {:?}",
+                    sub_scope
+                        .graph
+                        .nodes
+                        .iter()
+                        .map(|node| (node.tala_id, node.position, node.rect.size))
+                        .collect::<Vec<_>>()
+                );
+            }
             if crate::engine::trace_env_enabled("WEFTAN_TRACE_GRID_ROOT_PHASES")
                 && sub_scope
                     .graph
@@ -3642,6 +3750,23 @@ impl Pipeline {
             let iterations = (90.0 * (node_count as f64).sqrt()) as usize;
             let pass_count = iterations.saturating_sub(iterations / 2 + 1);
             sub_scope.run_split_subgraph_sized_pass(pass_count, Some(edge_abduction_nodes));
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_SCOPE_POS")
+                && placement
+                    .scoring_node_metadata
+                    .first()
+                    .and_then(|metadata| metadata.parent_tala_id)
+                    == Some(2_367_942_975)
+            {
+                eprintln!(
+                    "SCOPE_POS_RUST phase=after-opt {:?}",
+                    sub_scope
+                        .graph
+                        .nodes
+                        .iter()
+                        .map(|node| (node.tala_id, node.position, node.rect.size))
+                        .collect::<Vec<_>>()
+                );
+            }
             if crate::engine::trace_env_enabled("WEFTAN_TRACE_GRID_ROOT_PHASES")
                 && sub_scope
                     .graph
@@ -4151,6 +4276,21 @@ impl Pipeline {
             }
             let pre_direct_external_children =
                 directed.transaction_external_container_children.clone();
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_DIRECT_POS") {
+                eprint!(
+                    "DIRECT_BEFORE_RUST root={:?}",
+                    placement
+                        .scoring_node_metadata
+                        .first()
+                        .and_then(|metadata| metadata.parent_tala_id)
+                );
+                for node in &directed.nodes {
+                    if let Some(position) = node.position {
+                        eprint!(" {}={},{}", node.tala_id, position.x, position.y);
+                    }
+                }
+                eprintln!();
+            }
             if crate::engine::trace_env_enabled("WEFTAN_TRACE_DEBUG_PARENT")
                 && placement
                     .scoring_node_metadata
@@ -4554,7 +4694,7 @@ impl Pipeline {
             .flatten()
             .filter_map(|member| Some((member.tala_id, member.position?)))
             .collect::<BTreeMap<_, _>>();
-        let external_shared_child_offsets = scope
+        let external_shared_child_offsets: Vec<(u64, u64, Point)> = scope
             .graph
             .transaction_external_container_children
             .iter()
@@ -4633,6 +4773,24 @@ impl Pipeline {
             })
             .flatten()
             .collect();
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_CLUSTER_POSITION") {
+            eprintln!(
+                "CLUSTER_POSITION_RUST root={:?} positions={:?} external={:?}",
+                placement
+                    .scoring_node_metadata
+                    .first()
+                    .and_then(|metadata| metadata.parent_tala_id),
+                cluster_vessel_positions,
+                external_shared_child_offsets
+                    .iter()
+                    .filter(|(_, child, _)| {
+                        placement.projected_clusters.iter().any(|projection| {
+                            scope.graph.nodes[projection.node.0 as usize].tala_id == *child
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            );
+        }
         if crate::engine::trace_env_enabled("WEFTAN_TRACE_GRID_OFFSETS") {
             eprintln!(
                 "GRID_SCOPE_OFFSETS_RUST root={:?} parent={:?} parent_pos={:?} children={:?}",

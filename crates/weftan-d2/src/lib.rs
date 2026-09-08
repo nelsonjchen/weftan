@@ -19,10 +19,10 @@ use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 use weftan::{
-    ArrowheadLabel, CanvasPosition, ContentAlignment, Direction, Edge, EdgeArrowheadLabels,
-    EdgeArrowheads, EdgeArrows, EdgeId, EdgeLabel, EdgeStyle, EdgeTableColumns, Engine,
-    ExternalAlignment, ExternalLabel, ExternalSide, Graph, Insets, LabelPosition, LayoutOptions,
-    LayoutReport, Node, NodeId, Point, ShapeKind, Size,
+    ArrowheadLabel, ContentAlignment, Direction, Edge, EdgeArrowheadLabels, EdgeArrowheads,
+    EdgeArrows, EdgeId, EdgeLabel, EdgeStyle, EdgeTableColumns, Engine, ExternalAlignment,
+    ExternalLabel, ExternalSide, Graph, Insets, LabelPosition, LayoutOptions, LayoutReport, Node,
+    NodeId, Point, ShapeKind, Size,
     diagnostic::{LayoutStage, layout_snapshot},
 };
 
@@ -907,10 +907,17 @@ fn decode_graph(document: &Value, lock_existing: bool) -> Result<DecodedGraph, D
         if let Some(target_id) = node_ids.get(&target).copied() {
             graph.node_mut(id).expect("known node").near = Some(target_id);
         } else if target == "top-center" && !is_container {
-            graph.node_mut(id).expect("known node").canvas_position =
-                Some(CanvasPosition::TopCenter);
+            // OSS TALA validates near constants but does not translate
+            // top-center into a fixed node. The ordinary root BinPack stage
+            // establishes the same final top-centered placement; marking a
+            // canvas anchor here would suppress that stage and change the
+            // translation of every disconnected component.
         } else if target == "bottom-right" {
-            graph.node_mut(id).expect("known node").direction = Some(Direction::Right);
+            // OSS TALA validates this near constant but does not turn it into
+            // an explicit direction.  The optimizer's default
+            // `BottomRight` direction is part of the placement behavior for
+            // these nodes; treating the marker as `Right` changes the
+            // sizeless objective before any geometry is computed.
         }
     }
 

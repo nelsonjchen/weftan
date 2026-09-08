@@ -44,14 +44,16 @@ The publication review compared the recovered Rust stages with
 | Node and edge label placement | `internal/labeling` |
 | Shape geometry and D2 adapter | `internal/nodeshape`, adapter and D2 geometry helpers |
 
-This is a provenance comparison, not an assertion of source identity or
-geometry parity with the newly released engine. Weftan retains its TALA
-v0.4.3 compatibility target. Current upstream has additional guards and
-algorithm changes. In particular, upstream now uses a binary priority
-queue; Weftan retains a recovered Fibonacci heap whose implementation
-closely corresponds to Workiva/go-datastructures. Its Apache-2.0 terms are
-preserved separately. The translated Go random and sort routines retain
-their BSD-3-Clause notices.
+This is a provenance comparison, not an assertion of source identity. The
+active compatibility target is the TALA bundled in D2 v0.9.0, pinned by
+commit and Go toolchain in [the oracle record](d2-v0.9.0-oracle.md). Weftan
+still contains recovered implementations whose historical behavior predates
+that publication, so parity work is verified by final geometry and normalized
+execution traces rather than by changing labels alone. Upstream now uses a
+binary priority queue; Weftan retains a recovered Fibonacci heap whose
+implementation closely corresponds to Workiva/go-datastructures. Its
+Apache-2.0 terms are preserved separately. The translated Go random and sort
+routines retain their BSD-3-Clause notices.
 
 Upstream recognizes Alexander Wang, Gavin Nishizawa, and Júlio César Batista
 as substantive TALA contributors. Its algorithm references include:

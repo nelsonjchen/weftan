@@ -2290,6 +2290,27 @@ impl ArenaGraph {
 
     #[track_caller]
     pub(super) fn move_active_node_abs_with_children(&mut self, node: NodeId, target: Point) {
+        if crate::engine::trace_env_value("WEFTAN_TRACE_ACTIVE_MOVE_NODE").is_some_and(
+            |target_id| {
+                target_id == "all"
+                    || target_id.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id)
+            },
+        ) {
+            eprintln!(
+                "ACTIVE_MOVE_RUST caller={} node={} aggregate={} current={:?} target={},{} leaves={:?}",
+                std::panic::Location::caller(),
+                self.nodes[node.0 as usize].tala_id,
+                self.active_node_is_aggregate(node),
+                self.active_node_position(node),
+                target.x,
+                target.y,
+                self.active_aggregate_leaf_members(node)
+                    .map(|members| members
+                        .iter()
+                        .map(|member| self.nodes[member.0 as usize].tala_id)
+                        .collect::<Vec<_>>()),
+            );
+        }
         if crate::engine::trace_env_enabled("WEFTAN_TRACE_CALLER_3447521236")
             && self.nodes[node.0 as usize].tala_id == 3447521236
             && target.y == self.active_node_position(node).unwrap_or_default().y - 1.0
@@ -3158,6 +3179,19 @@ impl ArenaGraph {
                     .map(|position| (position, self.active_node_size(node)))
             })
             .collect::<Vec<_>>();
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_OVERLAP_PAIR")
+            && nodes
+                .iter()
+                .any(|node| matches!(self.nodes[node.0 as usize].tala_id, 560439961 | 510107104))
+        {
+            eprintln!(
+                "OVERLAP_ORDER_RUST nodes={:?}",
+                nodes
+                    .iter()
+                    .map(|node| self.nodes[node.0 as usize].tala_id)
+                    .collect::<Vec<_>>()
+            );
+        }
         for (index, left) in nodes.iter().copied().enumerate() {
             let Some((a, left_size)) = geometry[index] else {
                 continue;
@@ -3222,7 +3256,7 @@ impl ArenaGraph {
             .iter()
             .copied()
             .map(|node| {
-                self.position(node)
+                self.active_node_position(node)
                     .map(|position| (position, self.active_node_size(node)))
             })
             .collect::<Vec<_>>();
@@ -3359,10 +3393,23 @@ impl ArenaGraph {
             .iter()
             .copied()
             .map(|node| {
-                self.position(node)
+                self.active_node_position(node)
                     .map(|position| (position, self.active_node_size(node)))
             })
             .collect::<Vec<_>>();
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_OVERLAP_PAIR")
+            && nodes
+                .iter()
+                .any(|node| matches!(self.nodes[node.0 as usize].tala_id, 560439961 | 510107104))
+        {
+            eprintln!(
+                "OVERLAP_MODE_ORDER_RUST nodes={:?}",
+                nodes
+                    .iter()
+                    .map(|node| self.nodes[node.0 as usize].tala_id)
+                    .collect::<Vec<_>>()
+            );
+        }
         for (index, left) in nodes.iter().copied().enumerate() {
             let Some((a, left_size)) = geometry[index] else {
                 continue;
@@ -3377,6 +3424,23 @@ impl ArenaGraph {
                     || self.is_descendant_of(left, right)
                     || self.is_descendant_of(right, left)
                 {
+                    if crate::engine::trace_env_enabled("WEFTAN_TRACE_OVERLAP_PAIR") {
+                        let left_id = self.nodes[left.0 as usize].tala_id;
+                        let right_id = self.nodes[right.0 as usize].tala_id;
+                        if (left_id == 560439961 && right_id == 510107104)
+                            || (left_id == 510107104 && right_id == 560439961)
+                        {
+                            eprintln!(
+                                "OVERLAP_PAIR_RUST_SKIP left={} right={} existing={} left_desc_right={} right_desc_left={} order_len={}",
+                                left_id,
+                                right_id,
+                                existing_overlaps.contains(&pair),
+                                self.is_descendant_of(left, right),
+                                self.is_descendant_of(right, left),
+                                nodes.len()
+                            );
+                        }
+                    }
                     continue;
                 }
                 let Some((b, right_size)) = geometry[right_index] else {
@@ -3392,6 +3456,18 @@ impl ArenaGraph {
                     && a.y < b.y + right_size.height + delta
                     && b.y < a.y + left_size.height + delta
                 {
+                    if crate::engine::trace_env_enabled("WEFTAN_TRACE_OVERLAP_PAIR") {
+                        let left_id = self.nodes[left.0 as usize].tala_id;
+                        let right_id = self.nodes[right.0 as usize].tala_id;
+                        if (left_id == 560439961 && right_id == 510107104)
+                            || (left_id == 510107104 && right_id == 560439961)
+                        {
+                            eprintln!(
+                                "OVERLAP_PAIR_RUST_HIT left={} right={} delta={} left_box={:?}/{:?} right_box={:?}/{:?}",
+                                left_id, right_id, delta, a, left_size, b, right_size
+                            );
+                        }
+                    }
                     if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_NODE") {
                         eprintln!(
                             "GAP_RUST_NEW_PAIR_FULL left={} right={} delta={} leftBox={:?},{:?} rightBox={:?},{:?}",
@@ -3881,6 +3957,12 @@ impl ArenaGraph {
                 let current = self
                     .position(container)
                     .expect("positioned transaction container");
+                if trace_wrap {
+                    eprintln!(
+                        "WRAP_DETAIL_RUST node={} current={:?} content={:?} padding={:?} fitted={:?} placement={:?}",
+                        container_tala_id, current, content, padding, fitted, placement
+                    );
+                }
                 let position = Point {
                     x: current.x + top_left.x - placement.x,
                     y: current.y + top_left.y - placement.y,
@@ -3991,6 +4073,12 @@ impl ArenaGraph {
             let current = self
                 .position(container)
                 .expect("positioned transaction container");
+            if trace_wrap {
+                eprintln!(
+                    "WRAP_DETAIL_RUST node={} current={:?} content={:?} padding={:?} fitted={:?} placement={:?}",
+                    container_tala_id, current, content, padding, fitted, placement
+                );
+            }
             let position = Point {
                 x: current.x + top_left.x - placement.x,
                 y: current.y + top_left.y - placement.y,
@@ -4727,7 +4815,9 @@ impl ArenaGraph {
                     * self.active_edge_count(node) as f64
         });
         let total = edge_length + self.global_edge_crossings() as f64 * self.crossing_cost;
-        if let Some(state) = edge_length_state {
+        if std::env::var_os("WEFTAN_DISABLE_EDGE_CACHE").is_none()
+            && let Some(state) = edge_length_state
+        {
             self.edge_length_cache
                 .lock()
                 .expect("edge-length cache mutex poisoned")
@@ -4846,7 +4936,9 @@ impl ArenaGraph {
             false,
             materialized_containers,
         );
-        if let Some(state) = edge_length_state {
+        if std::env::var_os("WEFTAN_DISABLE_EDGE_CACHE").is_none()
+            && let Some(state) = edge_length_state
+        {
             if let Some(cached) = self
                 .edge_length_cache
                 .lock()
@@ -4887,6 +4979,16 @@ impl ArenaGraph {
             value
         });
         let total = edge_length + self.global_edge_crossings() as f64 * self.crossing_cost;
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_EDGE_LENGTH_TERMS") {
+            eprintln!(
+                "EDGE_TOTAL_RUST edge_length={} crossings={} crossing_cost={} total={} restored={}",
+                edge_length,
+                self.global_edge_crossings(),
+                self.crossing_cost,
+                total,
+                tree_children_restored
+            );
+        }
         if let Some(state) = edge_length_state {
             self.edge_length_cache
                 .lock()

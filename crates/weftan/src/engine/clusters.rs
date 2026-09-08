@@ -457,7 +457,16 @@ impl ArenaGraph {
             let delta = match desired {
                 ClusterArrangement::Row => Point {
                     x: ((prior_size.width - new_size.width) / 2.0).round(),
-                    y: 0.0,
+                    // OSS TALA's transaction synchronization leaves a
+                    // Column→Row vessel anchored to the old lower edge. The
+                    // temporary vessel therefore moves down by the complete
+                    // height reduction after its row resize; the stable-arena
+                    // projection must publish that carrier translation too.
+                    y: if std::env::var_os("WEFTAN_DISABLE_ROW_CARRIER_SHIFT").is_some() {
+                        0.0
+                    } else {
+                        prior_size.height - new_size.height
+                    },
                 },
                 ClusterArrangement::Column => Point {
                     x: 0.0,
@@ -1118,6 +1127,19 @@ impl ArenaGraph {
                 // that temporary vessel.
                 let vessel_tala_id = misc_rng.int63() as u64;
                 let cluster = self.clusters.len();
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_CLUSTER_CREATE") {
+                    eprintln!(
+                        "CLUSTER_CREATE_RUST before vessel={} members={:?}",
+                        vessel_tala_id,
+                        members
+                            .iter()
+                            .map(|member| {
+                                let node = &self.nodes[member.0 as usize];
+                                (node.tala_id, node.position, node.rect.size)
+                            })
+                            .collect::<Vec<_>>()
+                    );
+                }
                 let vessel_position = members
                     .iter()
                     .filter_map(|member| self.nodes[member.0 as usize].position)
@@ -1154,6 +1176,21 @@ impl ArenaGraph {
                     self.pending_cluster_vessel_positions
                         .insert(cluster, position);
                     self.arrange_cluster_members(cluster, position);
+                }
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_CLUSTER_CREATE") {
+                    eprintln!(
+                        "CLUSTER_CREATE_RUST after vessel={} pending={:?} members={:?}",
+                        vessel_tala_id,
+                        self.pending_cluster_vessel_positions.get(&cluster),
+                        self.clusters[cluster]
+                            .members
+                            .iter()
+                            .map(|member| {
+                                let node = &self.nodes[member.0 as usize];
+                                (node.tala_id, node.position, node.rect.size)
+                            })
+                            .collect::<Vec<_>>()
+                    );
                 }
             }
         }

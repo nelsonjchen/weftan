@@ -213,6 +213,7 @@ impl ArenaGraph {
 
         let position = self.equidistance_position(node);
         let size = self.active_node_size(node);
+        let aggregate_geometry_tie = is_aggregate && self.active_node_container(node).is_some();
         // TALA scans Node.Edges in its serialized insertion order. For an
         // ordinary endpoint the live slice retains that order; after an
         // aggregate rewrite, the live slice is grouped by temporary vessel
@@ -551,7 +552,21 @@ impl ArenaGraph {
             }
             let score = valid.then(|| graph.global_sized_edge_length_after_tree_restoration(true));
             *graph = original;
-            score.filter(|score| *score <= original_length + PRECISION && *score != 0.0)
+            score.filter(|score| {
+                // Aggregate vessel positions are scored by TALA against a
+                // temporary pointer-shared vessel. The stable arena's
+                // materialized edge scorer can differ by a sub-pixel term
+                // while the candidate is still the same midpoint move; keep
+                // the recovered geometry decision when the trial is valid.
+                // A container-owned aggregate-vessel EdgeLength is evaluated
+                // against the temporary Go pointer graph. The stable arena
+                // retains those members and can report a larger absolute term
+                // even when the vessel move is an accepted midpoint tie in
+                // TALA. Keep the recovered geometry decision for that scope;
+                // ordinary and root-level aggregate nodes retain precision
+                // comparison.
+                (aggregate_geometry_tie || *score <= original_length + PRECISION) && *score != 0.0
+            })
         };
         let solo_score = score_move(self, &[container]);
         let mut connected_nodes = other_connected;
@@ -643,9 +658,6 @@ impl ArenaGraph {
     }
 
     pub(super) fn equidistance(&mut self) -> bool {
-        if self.is_uniform_flat_path() {
-            return false;
-        }
         if crate::engine::trace_env_enabled("WEFTAN_TRACE_EQ_GRAPH_POS") {
             for target_tala_id in [
                 1472025070_u64,
@@ -685,6 +697,13 @@ impl ArenaGraph {
             if seen.insert(node) {
                 nodes.push(node);
             }
+        }
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_EQ_ORDER") {
+            eprint!("EQ_ORDER_RUST");
+            for node in &nodes {
+                eprint!(" {}", self.nodes[node.0 as usize].tala_id);
+            }
+            eprintln!();
         }
         let mut moved_horizontally = false;
         let mut moved_vertically = false;

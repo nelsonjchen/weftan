@@ -190,6 +190,23 @@ impl ArenaGraph {
                 if !self.edge_is_directed(edge_id) {
                     delta = delta * 0.1 + compass_axis_delta(compass, used) * 0.9;
                 }
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZELESS_STEPS")
+                    && matches!(
+                        self.nodes[node.0 as usize].tala_id,
+                        510_107_104 | 560_439_961
+                    )
+                {
+                    eprintln!(
+                        "SIZELESS_RUST_DIRECTION node={} adjacent={} directed={} desired={} factor={} used={} delta={}",
+                        self.nodes[node.0 as usize].tala_id,
+                        self.nodes[adjacent.0 as usize].tala_id,
+                        self.edge_is_directed(edge_id),
+                        desired.compass(),
+                        factor,
+                        used,
+                        delta
+                    );
+                }
                 distance += delta * factor * 0.25;
             }
             total += distance;
@@ -205,7 +222,43 @@ impl ArenaGraph {
             }
             total += minimum;
         }
-        total += self.common_uncle_penalty(node, false);
+        let common_uncle = self.common_uncle_penalty(node, false);
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZELESS_STEPS")
+            && matches!(
+                self.nodes[node.0 as usize].tala_id,
+                510_107_104 | 560_439_961
+            )
+        {
+            let trace_node = &self.nodes[node.0 as usize];
+            eprintln!(
+                "SIZELESS_RUST_META node={} container={:?} scoring_parent={:?} ancestors={:?} is_container={} scoring_container={} graph_nodes={} scoring_dirs={:?} scoring_dirs_by_tala={:?}",
+                trace_node.tala_id,
+                trace_node
+                    .container
+                    .map(|id| self.nodes[id.0 as usize].tala_id),
+                trace_node.scoring_container_parent,
+                trace_node.scoring_container_ancestors,
+                trace_node.is_container,
+                trace_node.scoring_is_container,
+                self.nodes.len(),
+                self.scoring_directions,
+                self.scoring_directions_by_tala
+            );
+            eprintln!(
+                "SIZELESS_RUST_COMPONENTS node={} edge_total={:.17} near_count={} common={:.17} siblings={:?}",
+                self.nodes[node.0 as usize].tala_id,
+                total,
+                self.nodes[node.0 as usize].nears.len(),
+                common_uncle,
+                self.common_uncle_siblings
+                    .get(&node)
+                    .map(|siblings| siblings
+                        .iter()
+                        .map(|s| self.nodes[s.0 as usize].tala_id)
+                        .collect::<Vec<_>>())
+            );
+        }
+        total += common_uncle;
         total
     }
 

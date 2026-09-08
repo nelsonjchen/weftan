@@ -6,9 +6,11 @@
 
 [Development](docs/development.md) · [Compatibility status](docs/status.md)
 
-Weftan is an offline graph-layout engine and D2 plugin. Its Rust pipeline is
-translated from Go source reconstructed from TALA v0.4.3 release artifacts;
-it is recovery-informed, not a clean-room reimplementation.
+Weftan is an offline graph-layout engine and D2 plugin. Its Rust pipeline was
+recovered from earlier TALA release artifacts and is now being aligned against
+the open-source TALA implementation shipped in D2 v0.9.0. The recovered Rust
+translation predates that publication and is not claimed to have been copied
+from the open-source release.
 
 ![A Weftan route traveling around an obstacle](artifacts/comparison/routing-weftan-parity.svg)
 
@@ -70,25 +72,25 @@ shape-border tracing, and node and edge label placement.
 
 ## Current parity
 
-The current optimized macOS ARM64 measurement compares Weftan with the
-pristine TALA v0.4.3 plugin over 121 serialized graphs.
+The current measurement compares Weftan with an instrumented D2 v0.9.0 TALA
+oracle over the checked-in serialized corpus.
 
 | Measurement | Result |
 | --- | ---: |
-| Successful single-seed comparisons, seeds 1–10 | **1,200 / 1,200 exact** |
-| Boxes | **29,640 / 29,640 exact** |
-| Routes and edge-label placements | **9,740 / 9,740 exact** |
-| Node-label and icon placements | **59,280 / 59,280 exact** |
-| Successful combined RaceSeeds comparisons, seeds 1–10 | **113 / 113 exact** |
+| Successful single-seed comparisons in the current baseline | **108 / 116 exact** |
+| Exact boxes across successful cases | **2,117 / 2,196** |
+| Exact routes across successful cases | **729 / 808** |
+| Exact edge labels across successful cases | **798 / 808** |
+| Exact node labels across successful cases | **2,190 / 2,196** |
+| Exact node icons across successful cases | **2,196 / 2,196** |
 
-One oversized grid case timed out in TALA for every isolated seed, so it is
-reported as an error rather than counted as a match. The combined RaceSeeds
-run had eight oracle-timeout cases and no geometry mismatch among successful
-cases. The precise timeout set can vary with concurrent load, so the checked-in
-record captures the exact measured run.
-These are corpus measurements, not a claim that every possible D2 graph is
-identical. See [the dated measurement record](docs/tala-parity-baseline.json)
-and [status notes](docs/status.md) for the exact scope and commands.
+The baseline records oracle timeout and malformed-input cases separately.
+Simple, label-position, icon-position, all-shapes, and flipt witnesses have
+byte-identical normalized traces; the five timeout or oracle-work-limit cases
+are recorded in
+[the dated measurement record](docs/tala-parity-baseline.json) and
+[status notes](docs/status.md). These are corpus measurements, not a claim
+that every possible D2 graph is identical.
 
 ## Reproducible choices
 

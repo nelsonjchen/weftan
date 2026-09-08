@@ -31,6 +31,11 @@ pub(super) struct SizelessOptimizer<'a> {
     rng: GoRng,
 }
 
+fn is_nested_trace_node(tala_id: u64) -> bool {
+    let _ = tala_id;
+    true
+}
+
 impl<'a> SizelessOptimizer<'a> {
     pub(super) fn graph(&self) -> &ArenaGraph {
         self.graph
@@ -52,13 +57,32 @@ impl<'a> SizelessOptimizer<'a> {
         // order. ArenaGraph recovers that order where its graph scope matches.
         let nodes = graph.optimizer_nodes();
         let occupied = graph.occupied_nodes();
-        Self {
+        let optimizer = Self {
             graph,
             nodes,
             components,
             occupied,
             rng,
+        };
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZELESS_STEPS")
+            && optimizer
+                .nodes
+                .iter()
+                .any(|node| is_nested_trace_node(optimizer.graph.nodes[node.0 as usize].tala_id))
+        {
+            eprintln!(
+                "SIZELESS_RUST_NEW nodes={:?}",
+                optimizer
+                    .nodes
+                    .iter()
+                    .map(|node| {
+                        let n = &optimizer.graph.nodes[node.0 as usize];
+                        (n.tala_id, n.position)
+                    })
+                    .collect::<Vec<_>>()
+            );
         }
+        optimizer
     }
 
     pub(super) fn into_rng(self) -> GoRng {
@@ -208,10 +232,23 @@ impl<'a> SizelessOptimizer<'a> {
             median.x = median.x.max(origin.x);
             median.y = median.y.max(origin.y);
         }
-        Point {
+        let point = Point {
             x: median.x.round(),
             y: median.y.round(),
+        };
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZELESS_STEPS")
+            && is_nested_trace_node(self.graph.nodes[node.0 as usize].tala_id)
+        {
+            eprintln!(
+                "SIZELESS_RUST_MEDIAN node={} base={:?} temperature={} result={:?} draws={}",
+                self.graph.nodes[node.0 as usize].tala_id,
+                self.graph.median_to_neighbors(node),
+                temperature,
+                point,
+                self.rng.draw_count()
+            );
         }
+        point
     }
 
     fn move_node_to_best(&mut self, node: NodeId, points: &[Point]) -> bool {
@@ -223,6 +260,14 @@ impl<'a> SizelessOptimizer<'a> {
         for point in points.iter().copied() {
             self.graph.move_node_abs_with_children(node, point);
             let distance = self.graph.sizeless_edge_length(node, true);
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZELESS_STEPS")
+                && is_nested_trace_node(self.graph.nodes[node.0 as usize].tala_id)
+            {
+                eprintln!(
+                    "SIZELESS_RUST_SCORE node={} candidate={:?} score={:.17}",
+                    self.graph.nodes[node.0 as usize].tala_id, point, distance
+                );
+            }
             match precision_compare(distance, best_distance) {
                 std::cmp::Ordering::Less => {
                     best_distance = distance;
@@ -263,6 +308,22 @@ impl<'a> SizelessOptimizer<'a> {
         let mut minimum_l1 = self.graph.sizeless_edge_length(node, true);
         let mut candidates = self.swap_candidates(node);
         self.rng.shuffle(&mut candidates);
+        let trace_swap = crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZELESS_STEPS")
+            && is_nested_trace_node(self.graph.nodes[node.0 as usize].tala_id);
+        if trace_swap {
+            eprint!(
+                "SIZELESS_RUST_SWAP_START node={} min={:.17} candidates=",
+                self.graph.nodes[node.0 as usize].tala_id, minimum_l1
+            );
+            for candidate in &candidates {
+                eprint!(
+                    "{}@{:?} ",
+                    self.graph.nodes[candidate.0 as usize].tala_id,
+                    self.graph.position(*candidate)
+                );
+            }
+            eprintln!();
+        }
         let mut best = None;
         for candidate in candidates {
             let current_l2 = self.graph.sizeless_edge_length(candidate, true);
@@ -275,9 +336,29 @@ impl<'a> SizelessOptimizer<'a> {
             };
             self.graph.swap_positions(node, candidate);
 
+            if trace_swap {
+                eprintln!(
+                    "SIZELESS_RUST_SWAP_CAND node={} candidate={} current={:.17} swapped1={:.17} swapped2={:.17}",
+                    self.graph.nodes[node.0 as usize].tala_id,
+                    self.graph.nodes[candidate.0 as usize].tala_id,
+                    current_l2,
+                    swapped_l1,
+                    swapped_l2
+                );
+            }
+
             if precision_compare(swapped_l1, minimum_l1).is_lt()
                 && !precision_compare(swapped_l2, current_l2).is_gt()
             {
+                if trace_swap {
+                    eprintln!(
+                        "SIZELESS_RUST_SWAP_ACCEPT node={} candidate={} l1={:.17} l2={:.17}",
+                        self.graph.nodes[node.0 as usize].tala_id,
+                        self.graph.nodes[candidate.0 as usize].tala_id,
+                        swapped_l1,
+                        swapped_l2
+                    );
+                }
                 minimum_l1 = swapped_l1;
                 best = Some(candidate);
             }
@@ -288,6 +369,18 @@ impl<'a> SizelessOptimizer<'a> {
     pub(super) fn optimize(&mut self, temperature: f64) {
         let mut indices: Vec<_> = (0..self.nodes.len()).collect();
         self.rng.shuffle(&mut indices);
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZELESS_STEPS")
+            && self
+                .nodes
+                .iter()
+                .any(|node| is_nested_trace_node(self.graph.nodes[node.0 as usize].tala_id))
+        {
+            eprintln!(
+                "SIZELESS_RUST_SHUFFLE indices={:?} draws={}",
+                indices,
+                self.rng.draw_count()
+            );
+        }
         for index in indices {
             let node = self.nodes[index];
             let Some(position) = self.graph.position(node) else {
@@ -307,6 +400,25 @@ impl<'a> SizelessOptimizer<'a> {
                 if let Some(position) = self.graph.position(candidate) {
                     self.occupied.insert(Self::key(position), candidate);
                 }
+            }
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZELESS_STEPS")
+                && is_nested_trace_node(self.graph.nodes[node.0 as usize].tala_id)
+            {
+                eprintln!(
+                    "SIZELESS_RUST_POINTS node={} original={:?} median={:?} points={:?}",
+                    self.graph.nodes[node.0 as usize].tala_id, position, median, points
+                );
+                eprintln!(
+                    "SIZELESS_RUST_NODE node={} start={:?} median={:?} distance={} points={} moved={} end={:?} draws={}",
+                    self.graph.nodes[node.0 as usize].tala_id,
+                    position,
+                    median,
+                    distance,
+                    points.len(),
+                    moved,
+                    self.graph.position(node),
+                    self.rng.draw_count()
+                );
             }
             if let Some(position) = self.graph.position(node) {
                 self.occupied.insert(Self::key(position), node);

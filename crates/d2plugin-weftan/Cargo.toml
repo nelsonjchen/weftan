@@ -9,6 +9,9 @@ authors.workspace = true
 repository.workspace = true
 readme = "../../README.md"
 
+[features]
+diagnostic-traces = ["weftan/diagnostic-traces"]
+
 [[bin]]
 name = "d2plugin-weftan"
 path = "src/main.rs"

@@ -10,6 +10,46 @@
 
 use super::*;
 
+#[derive(Serialize)]
+struct NormalizedTracePoint {
+    x_bits: String,
+    y_bits: String,
+}
+
+#[derive(Serialize)]
+struct NormalizedTraceNode {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    x_bits: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    y_bits: Option<String>,
+    w_bits: String,
+    h_bits: String,
+}
+
+#[derive(Serialize)]
+struct NormalizedTraceEdge {
+    id: String,
+    index: usize,
+    from: String,
+    to: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    route: Vec<NormalizedTracePoint>,
+}
+
+#[derive(Serialize)]
+struct NormalizedTraceEvent {
+    event: &'static str,
+    stage: String,
+    seed: i64,
+    nodes: Vec<NormalizedTraceNode>,
+    edges: Vec<NormalizedTraceEdge>,
+}
+
+fn trace_float_bits(value: f64) -> String {
+    format!("0x{:016x}", value.to_bits())
+}
+
 fn trace_optimizer_state(phase: std::fmt::Arguments<'_>, graph: &ArenaGraph) {
     let Some(target) = crate::engine::trace_env_value("WEFTAN_TRACE_OPTIMIZER_MEMBER")
         .and_then(|value| value.parse::<u64>().ok())
@@ -19,13 +59,31 @@ fn trace_optimizer_state(phase: std::fmt::Arguments<'_>, graph: &ArenaGraph) {
     if !graph.nodes.iter().any(|node| node.tala_id == target) {
         return;
     }
-    eprint!("OPTIMIZER_STATE_RUST {phase}");
+    if crate::engine::trace_env_enabled("WEFTAN_TRACE_ROOT_ONLY") {
+        const ROOT_IDS: [u64; 4] = [
+            1639028324, // feed mixer
+            322706392,  // ingress
+            727256374,  // social frontend
+            308016937,  // source pack
+        ];
+        if graph.nodes.len() != 15
+            || ROOT_IDS
+                .iter()
+                .any(|id| !graph.nodes.iter().any(|node| node.tala_id == *id))
+        {
+            return;
+        }
+    }
+    eprint!("OPTIMIZER_STATE_RUST {phase} len={}", graph.nodes.len());
     for node in &graph.nodes {
         eprint!(" {}=", node.tala_id);
-        if let Some(position) = node.position {
+        if let Some(position) = graph.active_node_position(node.input_id) {
             eprint!(
                 "{},{}:{},{}",
-                position.x, position.y, node.rect.size.width, node.rect.size.height,
+                position.x,
+                position.y,
+                graph.active_node_size(node.input_id).width,
+                graph.active_node_size(node.input_id).height,
             );
         } else {
             eprint!("nil");
@@ -36,6 +94,7 @@ fn trace_optimizer_state(phase: std::fmt::Arguments<'_>, graph: &ArenaGraph) {
 
 impl Pipeline {
     pub(super) fn trace_node_stage(&self, stage: &str) {
+        self.emit_normalized_trace(stage);
         let Some(target) = crate::engine::trace_env_value("WEFTAN_TRACE_NODE_STAGES") else {
             return;
         };
@@ -155,9 +214,212 @@ impl Pipeline {
             }
             eprintln!();
         }
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_CLUSTER_STAGE") {
+            for (cluster_index, cluster) in self.graph.clusters.iter().enumerate() {
+                eprint!(
+                    "CLUSTER_STAGE_RUST stage={stage} vessel={} pending={:?}",
+                    cluster.vessel_tala_id,
+                    self.graph
+                        .pending_cluster_vessel_positions
+                        .get(&cluster_index)
+                );
+                for member in &cluster.members {
+                    let node = &self.graph.nodes[member.0 as usize];
+                    eprint!(
+                        " member={} pos={:?} size={:?}",
+                        node.tala_id, node.position, node.rect.size
+                    );
+                }
+                eprintln!();
+            }
+        }
+    }
+
+    /// Emits one deterministic JSONL stage snapshot for cross-language
+    /// differential debugging. Floating-point values are represented by their
+    /// exact IEEE-754 bit patterns; no timing, address, or thread data is
+    /// included. This path is enabled only by the diagnostic-traces feature.
+    fn emit_normalized_trace(&self, stage: &str) {
+        if !crate::engine::trace_env_enabled("WEFTAN_TRACE_JSONL") {
+            return;
+        }
+        let trace_nodes = if self.graph.node_order.is_empty() {
+            self.graph
+                .nodes
+                .iter()
+                .map(|node| node.input_id)
+                .collect::<Vec<_>>()
+        } else {
+            self.graph.node_order.clone()
+        };
+        let nodes = trace_nodes
+            .iter()
+            .filter_map(|node_id| self.trace_node(*node_id))
+            .collect();
+        let edges = self
+            .graph
+            .edges
+            .iter()
+            .enumerate()
+            .map(|(index, edge)| NormalizedTraceEdge {
+                id: edge.input_id.0.to_string(),
+                index,
+                from: self.trace_node_id(edge.from),
+                to: self.trace_node_id(edge.to),
+                route: edge
+                    .points
+                    .iter()
+                    .map(|point| NormalizedTracePoint {
+                        x_bits: trace_float_bits(point.x),
+                        y_bits: trace_float_bits(point.y),
+                    })
+                    .collect(),
+            })
+            .collect();
+        let event = NormalizedTraceEvent {
+            event: "stage",
+            stage: stage.to_owned(),
+            seed: self.seed,
+            nodes,
+            edges,
+        };
+        if let Ok(encoded) = serde_json::to_string(&event) {
+            eprintln!("{encoded}");
+        }
+    }
+
+    /// Returns the D2-visible identity and geometry for one active node.
+    ///
+    /// D2 temporarily replaces clustered members with a vessel node. Weftan's
+    /// production arena deliberately retains stable member IDs, so diagnostic
+    /// traces project that view here instead of exposing an implementation
+    /// detail to the cross-language comparator.
+    fn trace_node(&self, node_id: NodeId) -> Option<NormalizedTraceNode> {
+        let cluster = self.trace_cluster_for_node(node_id);
+        if let Some((cluster_index, cluster)) = cluster {
+            let members_visible = cluster
+                .members
+                .iter()
+                .all(|member| self.graph.node_order.contains(member));
+            if !members_visible {
+                let first = *cluster.members.first()?;
+                if node_id != first {
+                    return None;
+                }
+                let position = self
+                    .graph
+                    .pending_cluster_vessel_positions
+                    .get(&cluster_index)
+                    .copied()
+                    .or_else(|| self.graph.active_node_position(first));
+                let size = self.graph.cluster_vessel_size(cluster_index);
+                return Some(NormalizedTraceNode {
+                    id: self.trace_cluster_id(cluster),
+                    x_bits: position.map(|point| trace_float_bits(point.x)),
+                    y_bits: position.map(|point| trace_float_bits(point.y)),
+                    w_bits: trace_float_bits(size.width),
+                    h_bits: trace_float_bits(size.height),
+                });
+            }
+        }
+        if let Some((sequence_index, sequence)) = self.trace_sequence_for_node(node_id) {
+            let members_visible = sequence
+                .members
+                .iter()
+                .all(|member| self.graph.node_order.contains(member));
+            if !members_visible {
+                let first = *sequence.members.first()?;
+                if node_id != first {
+                    return None;
+                }
+                let position = self.graph.active_node_position(first);
+                let size = self.graph.sequence_vessel_size(sequence_index);
+                return Some(NormalizedTraceNode {
+                    id: self.trace_sequence_id(sequence),
+                    x_bits: position.map(|point| trace_float_bits(point.x)),
+                    y_bits: position.map(|point| trace_float_bits(point.y)),
+                    w_bits: trace_float_bits(size.width),
+                    h_bits: trace_float_bits(size.height),
+                });
+            }
+        }
+        let node = &self.graph.nodes[node_id.0 as usize];
+        let position = self.graph.active_node_position(node_id);
+        let size = self.graph.active_node_size(node_id);
+        Some(NormalizedTraceNode {
+            id: node.tala_id.to_string(),
+            x_bits: position.map(|point| trace_float_bits(point.x)),
+            y_bits: position.map(|point| trace_float_bits(point.y)),
+            w_bits: trace_float_bits(size.width),
+            h_bits: trace_float_bits(size.height),
+        })
+    }
+
+    fn trace_node_id(&self, node_id: NodeId) -> String {
+        if let Some((cluster_index, cluster)) = self.trace_cluster_for_node(node_id) {
+            let members_visible = cluster
+                .members
+                .iter()
+                .all(|member| self.graph.node_order.contains(member));
+            if !members_visible {
+                return self.trace_cluster_id(cluster);
+            }
+            let _ = cluster_index;
+        }
+        if let Some((_, sequence)) = self.trace_sequence_for_node(node_id) {
+            let members_visible = sequence
+                .members
+                .iter()
+                .all(|member| self.graph.node_order.contains(member));
+            if !members_visible {
+                return self.trace_sequence_id(sequence);
+            }
+        }
+        self.graph.nodes[node_id.0 as usize].tala_id.to_string()
+    }
+
+    fn trace_cluster_for_node(&self, node_id: NodeId) -> Option<(usize, &ClusterState)> {
+        self.graph
+            .clusters
+            .iter()
+            .enumerate()
+            .find(|(_, cluster)| cluster.members.contains(&node_id))
+    }
+
+    fn trace_cluster_id(&self, cluster: &ClusterState) -> String {
+        let arrangement = match cluster.arrangement {
+            ClusterArrangement::Row => "Row",
+            ClusterArrangement::Column => "Column",
+        };
+        let members = cluster
+            .members
+            .iter()
+            .map(|member| self.graph.nodes[member.0 as usize].tala_id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("cluster:[{members}]:{arrangement}")
+    }
+
+    fn trace_sequence_for_node(&self, node_id: NodeId) -> Option<(usize, &SequenceState)> {
+        self.graph
+            .sequences
+            .iter()
+            .enumerate()
+            .find(|(_, sequence)| sequence.members.contains(&node_id))
+    }
+
+    fn trace_sequence_id(&self, sequence: &SequenceState) -> String {
+        let members = sequence
+            .members
+            .iter()
+            .map(|member| self.graph.nodes[member.0 as usize].tala_id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("sequence:[{members}]")
     }
 
     fn trace_route_stage(&self, stage: &str) {
+        self.emit_normalized_trace(stage);
         if !crate::engine::trace_env_enabled("WEFTAN_TRACE_ROUTE_STAGES") {
             return;
         }
@@ -324,21 +586,26 @@ impl Pipeline {
     }
 
     pub(super) fn run_preprocess_hierarchies(&mut self) {
+        // TALA keeps hierarchy discovery/ranking's random stream separate from
+        // the placement stream. Discovery may consume tie-breaking draws, but
+        // PlaceHierarchies always starts its recursive sibling shuffles from
+        // the pipeline seed. Sharing one stream shifts every placement
+        // shuffle on graphs with a ranked automatic hierarchy.
+        let mut hierarchy_assignment_rng = go_rng::GoRng::new(self.seed);
         self.graph
-            .assign_forced_hierarchies_with_rng(&mut self.hierarchy_rng);
+            .assign_forced_hierarchies_with_rng(&mut hierarchy_assignment_rng);
         self.hierarchy_assignments = self
             .graph
-            .assign_automatic_hierarchies_with_rng_traced(&mut self.hierarchy_rng);
+            .assign_automatic_hierarchies_with_rng_traced(&mut hierarchy_assignment_rng);
         let hierarchy_ids = self
             .graph
             .nodes
             .iter()
             .filter_map(|node| node.hierarchy.map(|membership| membership.id))
             .collect::<BTreeSet<_>>();
-        // TALA consumes the same hierarchy RNG for assignment and the
-        // immediate `PlaceHierarchies` transaction. Automatic selection is
-        // still withheld until its recovered membership publication is wired;
-        // explicit hierarchy scopes already carry the full source state.
+        // Automatic selection is still withheld until its recovered membership
+        // publication is wired; explicit hierarchy scopes already carry the
+        // full source state.
         for hierarchy_id in hierarchy_ids {
             if let Some(trace) = self
                 .graph

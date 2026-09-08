@@ -265,7 +265,7 @@ impl ArenaGraph {
         // `ArenaEdge.input_id` remains the stable serialized D2 identity after
         // sequence-defining edges are disconnected.
         let edge_order = (0..edges.len()).map(|index| EdgeId(index as u32)).collect();
-        let mut directions_by_tala = BTreeMap::from([(None, input.direction)]);
+        let mut directions_by_tala = BTreeMap::from([(None, root_direction)]);
         let mut scoring_directions_by_tala = input
             .explicit_direction
             .map(|direction| BTreeMap::from([(None, direction)]))

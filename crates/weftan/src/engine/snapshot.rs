@@ -65,19 +65,27 @@ pub fn layout_snapshot(input: &Graph, seed: i64, stage: LayoutStage) -> LayoutSn
     );
     let mut pipeline = Pipeline::new(input, seed, false, false);
     pipeline.run_prescale();
+    pipeline.trace_node_stage("Prescale");
     if stage == LayoutStage::Prescale {
         return pipeline.snapshot(requested_stage);
     }
     pipeline.run_preprocess_sequences();
+    pipeline.trace_node_stage("PreprocessSequences");
     pipeline.run_preprocess();
+    pipeline.trace_node_stage("Preprocess");
     pipeline.run_preprocess_trees();
+    pipeline.trace_node_stage("PreprocessTrees");
     pipeline.run_preprocess_containers();
+    pipeline.trace_node_stage("PreprocessContainers");
     pipeline.run_preprocess_hierarchies();
+    pipeline.trace_node_stage("PreprocessHierarchies");
     if stage == LayoutStage::PreprocessHierarchies {
         return pipeline.snapshot(requested_stage);
     }
     pipeline.run_preprocess_clusters();
+    pipeline.trace_node_stage("PreprocessClusters");
     pipeline.run_preprocess_hubs();
+    pipeline.trace_node_stage("PreprocessHubs");
     // `PlaceHierarchies` has already established these coordinates. TALA's
     // sizeless/sized optimizers are constructed later for each ordinary
     // `SplitSubgraphs` result inside `Graph.placeNodes`; they never run once
@@ -446,6 +454,7 @@ pub fn layout_snapshot(input: &Graph, seed: i64, stage: LayoutStage) -> LayoutSn
         }
         if stage == LayoutStage::Rescale {
             pipeline.graph.restore_aggregate_members_to_node_order();
+            pipeline.trace_node_stage("CleanupStuff");
             pipeline.graph.compute_cell_size();
             pipeline.graph.pad();
             pipeline.trace_node_stage("Rescale");
@@ -595,6 +604,7 @@ pub fn layout_snapshot(input: &Graph, seed: i64, stage: LayoutStage) -> LayoutSn
         LayoutStage::ReorderDuplicates | LayoutStage::PlaceLabels | LayoutStage::Normalize
     ) {
         pipeline.run_reorder_duplicates();
+        pipeline.trace_node_stage("ReorderDuplicates");
     }
     if matches!(
         requested_stage,
@@ -612,6 +622,25 @@ pub fn layout_snapshot(input: &Graph, seed: i64, stage: LayoutStage) -> LayoutSn
     if requested_stage == LayoutStage::Normalize {
         pipeline.run_normalize();
         pipeline.trace_node_stage("Normalize");
+        if std::env::var_os("WEFTAN_DISABLE_COMPOUND_FLOW").is_none()
+            && pipeline.graph.apply_compound_flow()
+        {
+            crate::engine::set_trace_suppressed(true);
+            pipeline.run_edge_routing();
+            pipeline.run_simplify_edge_routes();
+            pipeline.run_swap_edge_ports();
+            pipeline.run_straight_edges_fallback();
+            pipeline.run_balance_edge_segments();
+            pipeline.run_fix_cluster_edge_branching();
+            pipeline.run_trace_edges_to_shape_border();
+            pipeline.run_reorder_duplicates();
+            // CompoundCandidate is evaluated after the complete local seed
+            // pipeline in released D2. Keep its candidate-local reroute out
+            // of the ordinary stage trace; the resulting graph is still the
+            // snapshot used for the public layout result.
+            pipeline.run_normalize();
+            crate::engine::set_trace_suppressed(false);
+        }
     }
     pipeline.snapshot(requested_stage)
 }

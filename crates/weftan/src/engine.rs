@@ -40,6 +40,8 @@ static ENVIRONMENT_KEYS: OnceLock<HashSet<OsString>> = OnceLock::new();
 #[cfg(feature = "diagnostic-traces")]
 static WEFTAN_ENVIRONMENT_STATE: AtomicU8 = AtomicU8::new(0);
 #[cfg(feature = "diagnostic-traces")]
+static TRACE_SUPPRESSED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "diagnostic-traces")]
 static SIZED_PASS_TRACE_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
@@ -75,6 +77,9 @@ const WEFTAN_ENVIRONMENT_PRESENT: u8 = 2;
 #[cfg(feature = "diagnostic-traces")]
 #[inline(always)]
 pub(crate) fn trace_env_enabled(name: &str) -> bool {
+    if TRACE_SUPPRESSED.load(Ordering::Relaxed) {
+        return false;
+    }
     // The sized-pass probe toggles this key between optimizer iterations so
     // that a single requested pass can be inspected without making every
     // optimizer call noisy.  Keep this one diagnostic gate live; the ordinary
@@ -86,6 +91,11 @@ pub(crate) fn trace_env_enabled(name: &str) -> bool {
         return false;
     }
     trace_env_enabled_slow(name)
+}
+
+#[cfg(feature = "diagnostic-traces")]
+pub(crate) fn set_trace_suppressed(suppressed: bool) {
+    TRACE_SUPPRESSED.store(suppressed, Ordering::Relaxed);
 }
 
 #[cfg(feature = "diagnostic-traces")]
@@ -122,6 +132,10 @@ pub(crate) fn trace_env_value(name: &str) -> Option<String> {
 pub(crate) fn trace_env_enabled(_name: &str) -> bool {
     false
 }
+
+#[cfg(not(feature = "diagnostic-traces"))]
+#[inline(always)]
+pub(crate) fn set_trace_suppressed(_suppressed: bool) {}
 
 #[cfg(not(feature = "diagnostic-traces"))]
 #[inline(always)]

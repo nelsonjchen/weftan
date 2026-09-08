@@ -9,7 +9,7 @@ require (
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/andybalholm/cascadia v1.3.4 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
-	github.com/d2lang/d2 v0.8.3-0.20260907205704-99b07917c875 // indirect
+	github.com/d2lang/d2 v0.9.0
 	github.com/d2lang/dagro v0.2.1 // indirect
 	github.com/d2lang/elk-go v0.2.0 // indirect
 	github.com/d2lang/mathjax-go v0.1.0 // indirect

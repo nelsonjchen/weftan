@@ -1118,6 +1118,17 @@ impl ArenaGraph {
         let original_score = self.bin_pack_score(&direct_children, scope);
         let (can_move_left, can_move_right, can_move_top, can_move_bottom) =
             self.bin_pack_movement_permissions(scope, edges_placed);
+        if trace_binpack_scope {
+            eprintln!(
+                "BINPACK_PERM_RUST root={:?} LRTB={}{}{}{} edges={}",
+                scope.map(|node| self.nodes[node.0 as usize].tala_id),
+                can_move_left,
+                can_move_right,
+                can_move_top,
+                can_move_bottom,
+                scope.map_or(0, |node| self.nodes[node.0 as usize].edges.len())
+            );
+        }
 
         // Canvas-positioned roots are anchors just like explicitly locked
         // nodes. TALA's later canvas pass may translate the other root
@@ -1579,9 +1590,45 @@ impl ArenaGraph {
             if !can_move_bottom {
                 self.nodes[container.0 as usize].rect.size.height = old_size.height;
             }
+            let Some(new_position) = self.position(container) else {
+                *self = original_graph;
+                return;
+            };
+            let new_size = self.nodes[container.0 as usize].rect.size;
+            let routed_wrap_outside_original = edges_placed
+                && (new_position.x < old_position.unwrap_or_default().x
+                    || new_position.y < old_position.unwrap_or_default().y
+                    || new_position.x + new_size.width
+                        > old_position.unwrap_or_default().x + old_size.width
+                    || new_position.y + new_size.height
+                        > old_position.unwrap_or_default().y + old_size.height);
+            // The release's routed-container proof is deliberately
+            // fail-closed. Until every clipped segment and endpoint check is
+            // represented here, preserve the original routed box whenever
+            // wrapping changes either dimension; shrinking can otherwise
+            // silently discard a route segment before the next routing pass.
+            let routed_wrap_changed_size = edges_placed
+                && (new_size.width != old_size.width || new_size.height != old_size.height);
+            let routed_wrap_changed_position = edges_placed
+                && (new_position.x != old_position.unwrap_or_default().x
+                    || new_position.y != old_position.unwrap_or_default().y);
             let wrapped_bad_state = self.bin_pack_wrapped_container_is_bad_state(container);
             if wrapped_bad_state {
                 *self = original_graph;
+            } else if routed_wrap_outside_original || routed_wrap_changed_size {
+                // TALA's routed-container KeepOriginalBox decision restores
+                // only the container box. The packed descendants and their
+                // translated routes remain part of the accepted transaction;
+                // restoring the whole arena here changes child order and
+                // geometry even though the oracle keeps them.
+                if routed_wrap_changed_position {
+                    // A routed root translated as part of the proposed box
+                    // also rolls its packed subtree back in the v0.9 path.
+                    *self = original_graph;
+                } else {
+                    self.set_position(container, old_position.unwrap_or_default());
+                    self.nodes[container.0 as usize].rect.size = old_size;
+                }
             }
         }
         if trace_binpack_scope {
@@ -1622,5 +1669,241 @@ impl ArenaGraph {
         let edges_placed = self.edges.iter().any(|edge| !edge.points.is_empty());
         self.bin_pack_recursive_scope(None, edges_placed);
         self.refresh_placement_components();
+    }
+
+    /// Reconstruct TALA's post-layout compound candidate for a connected set
+    /// of detailed root containers. The candidate keeps each interior rigid
+    /// and lays out the outer blocks in the graph direction, which is the
+    /// observable refinement used for graphs such as all_shapes_link.
+    pub(super) fn apply_compound_flow(&mut self) -> bool {
+        let roots = self.containers.get(&None).cloned().unwrap_or_default();
+        // Match the released v0.9 CompoundCandidate admission bounds. The
+        // candidate is a bounded post-selection refinement; large graphs are
+        // deliberately left on the ordinary pipeline path.
+        if self.nodes.len() > 128
+            || self.edges.len() > 256
+            || roots.len() < 3
+            || roots.len() > 64
+            || roots.iter().any(|root| {
+                !self.nodes[root.0 as usize].is_container
+                    || self
+                        .containers
+                        .get(&Some(*root))
+                        .is_none_or(|children| children.is_empty())
+            })
+            || self
+                .nodes
+                .iter()
+                .any(|node| node.fixed_top_left.is_some() || node.canvas_position.is_some())
+        {
+            return false;
+        }
+
+        // Compound placement in the released engine declines a drawing when
+        // every outer block is dominated by icon-bearing descendants: their
+        // boundary attachments are owned by icon placement rather than by the
+        // rigid block. Mixed drawings (for example, a single icon-bearing
+        // block beside ordinary containers) remain eligible.
+        let root_has_icon = |root: NodeId| {
+            self.nodes.iter().any(|node| {
+                if !(node.has_icon || node.shape == ShapeKind::Image) {
+                    return false;
+                }
+                let mut current = node.input_id;
+                while let Some(parent) = self.nodes[current.0 as usize].container {
+                    current = parent;
+                }
+                current == root
+            })
+        };
+        if roots.iter().all(|root| root_has_icon(*root)) {
+            return false;
+        }
+
+        let mut owner = BTreeMap::new();
+        for node in 0..self.nodes.len() {
+            let mut current = NodeId(node as u32);
+            while let Some(parent) = self.nodes[current.0 as usize].container {
+                current = parent;
+            }
+            if !roots.contains(&current) {
+                return false;
+            }
+            owner.insert(NodeId(node as u32), current);
+        }
+
+        let mut adjacency = BTreeMap::<NodeId, BTreeSet<NodeId>>::new();
+        let mut indegree = roots
+            .iter()
+            .copied()
+            .map(|root| (root, 0usize))
+            .collect::<BTreeMap<_, _>>();
+        for edge in &self.edges {
+            let (Some(&from), Some(&to)) = (owner.get(&edge.from), owner.get(&edge.to)) else {
+                return false;
+            };
+            if from == to {
+                continue;
+            }
+            if adjacency.entry(from).or_default().insert(to) {
+                *indegree.entry(to).or_default() += 1;
+            }
+        }
+        let mut undirected = BTreeMap::<NodeId, BTreeSet<NodeId>>::new();
+        for (from, tos) in &adjacency {
+            for to in tos {
+                undirected.entry(*from).or_default().insert(*to);
+                undirected.entry(*to).or_default().insert(*from);
+            }
+        }
+        let mut connected = BTreeSet::new();
+        let mut pending = roots.first().copied().into_iter().collect::<Vec<_>>();
+        while let Some(root) = pending.pop() {
+            if !connected.insert(root) {
+                continue;
+            }
+            pending.extend(undirected.get(&root).into_iter().flatten().copied());
+        }
+        if connected.len() != roots.len() {
+            return false;
+        }
+        // The recovered compound admission only keeps a directed backbone
+        // whose interfaces form a single flow. Fan-out/fan-in outer graphs
+        // are scored against their ordinary routed candidate and must not be
+        // compacted unconditionally here.
+        if adjacency.values().any(|targets| targets.len() > 1)
+            || indegree.values().any(|degree| *degree > 1)
+            || adjacency.len() != roots.len().saturating_sub(1)
+        {
+            return false;
+        }
+        let mut seen = BTreeSet::new();
+        let mut queue = roots
+            .iter()
+            .copied()
+            .filter(|root| indegree[root] == 0)
+            .collect::<Vec<_>>();
+        let flow_horizontal = matches!(
+            self.directions.get(&None),
+            Some(Direction::Right | Direction::Left)
+        );
+        queue.sort_by(|left, right| {
+            let left_pos = self.position(*left).unwrap_or_default();
+            let right_pos = self.position(*right).unwrap_or_default();
+            let left_axis = if flow_horizontal {
+                left_pos.x
+            } else {
+                left_pos.y
+            };
+            let right_axis = if flow_horizontal {
+                right_pos.x
+            } else {
+                right_pos.y
+            };
+            left_axis
+                .total_cmp(&right_axis)
+                .then_with(|| left.cmp(right))
+        });
+        let mut order = Vec::with_capacity(roots.len());
+        while let Some(current) = queue.first().copied() {
+            queue.remove(0);
+            if !seen.insert(current) {
+                continue;
+            }
+            order.push(current);
+            for next in adjacency.get(&current).into_iter().flatten().copied() {
+                let degree = indegree.get_mut(&next).expect("root indegree");
+                *degree -= 1;
+                if *degree == 0 {
+                    queue.push(next);
+                    queue.sort_by(|left, right| {
+                        let left_pos = self.position(*left).unwrap_or_default();
+                        let right_pos = self.position(*right).unwrap_or_default();
+                        let left_axis = if flow_horizontal {
+                            left_pos.x
+                        } else {
+                            left_pos.y
+                        };
+                        let right_axis = if flow_horizontal {
+                            right_pos.x
+                        } else {
+                            right_pos.y
+                        };
+                        left_axis
+                            .total_cmp(&right_axis)
+                            .then_with(|| left.cmp(right))
+                    });
+                }
+            }
+        }
+        if order.len() != roots.len() {
+            return false;
+        }
+
+        let gap = 90.0;
+        let max_cross = order
+            .iter()
+            .map(|root| {
+                let size = self.nodes[root.0 as usize].rect.size;
+                if flow_horizontal {
+                    size.height
+                } else {
+                    size.width
+                }
+            })
+            .fold(0.0, f64::max);
+        let mut cursor = 0.0;
+        let mut target = BTreeMap::new();
+        for (index, root) in order.into_iter().enumerate() {
+            let size = self.nodes[root.0 as usize].rect.size;
+            let cross = if flow_horizontal {
+                ((max_cross - size.height) / 2.0).ceil()
+            } else {
+                ((max_cross - size.width) / 2.0).ceil()
+            };
+            // TALA's vertical compound fit rounds the accumulated cross-axis
+            // envelope up by one pixel between root vessels; horizontal flow
+            // keeps the exact cursor boundary (the Flipt chain is the
+            // smallest witness for that distinction).
+            let flow_position = if index == 0 || flow_horizontal {
+                cursor
+            } else {
+                cursor + 1.0
+            };
+            target.insert(
+                root,
+                if flow_horizontal {
+                    Point {
+                        x: flow_position,
+                        y: cross,
+                    }
+                } else {
+                    Point {
+                        x: cross,
+                        y: flow_position,
+                    }
+                },
+            );
+            cursor += if flow_horizontal {
+                size.width
+            } else {
+                size.height
+            };
+            cursor += gap;
+        }
+        for root in roots {
+            let Some(current) = self.position(root) else {
+                return false;
+            };
+            let desired = target[&root];
+            self.translate_node_with_children(
+                root,
+                Point {
+                    x: desired.x - current.x,
+                    y: desired.y - current.y,
+                },
+            );
+        }
+        true
     }
 }

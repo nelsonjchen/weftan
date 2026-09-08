@@ -84,10 +84,13 @@ impl ArenaGraph {
     /// `Directions` entry.
     pub(super) fn container_direction_is_unset(&self, node: NodeId) -> bool {
         let container = self.nodes[node.0 as usize].container;
+        let container_tala_id = self.nodes[node.0 as usize].scoring_container_parent;
+        if let Some(parent) = container_tala_id {
+            return !self.scoring_directions_by_tala.contains_key(&Some(parent));
+        }
         if self.scoring_directions.contains_key(&container) {
             return false;
         }
-        let container_tala_id = self.nodes[node.0 as usize].scoring_container_parent;
         !self
             .scoring_directions_by_tala
             .contains_key(&container_tala_id)
@@ -110,12 +113,15 @@ impl ArenaGraph {
         if !use_recovered_unset_scoring {
             let container = self.nodes[node.0 as usize].container;
             let container_tala_id = self.nodes[node.0 as usize].scoring_container_parent;
-            let direction = self
-                .directions
-                .get(&container)
-                .copied()
-                .or_else(|| self.directions_by_tala.get(&container_tala_id).copied())
-                .unwrap_or(Direction::Right);
+            let direction = if let Some(parent) = container_tala_id {
+                self.directions_by_tala.get(&Some(parent)).copied()
+            } else {
+                self.directions
+                    .get(&container)
+                    .copied()
+                    .or_else(|| self.directions_by_tala.get(&container_tala_id).copied())
+            }
+            .unwrap_or(Direction::Right);
             return (
                 layout_orientation(direction),
                 if include_sizes { 6.0 } else { 1.5 },
@@ -1204,6 +1210,9 @@ impl ArenaGraph {
     }
 
     pub(super) fn swap_optimize(&mut self) -> bool {
+        if crate::engine::trace_env_enabled("WEFTAN_DISABLE_SWAP_OPTIMIZE") {
+            return false;
+        }
         // swap.go delegates every strict comparison to geo.PrecisionCompare;
         // the recovered release uses geo.PRECISION (0.0001), not the tighter
         // optimizer-local epsilon.  Keep the same boundary so near-tied
@@ -1221,6 +1230,22 @@ impl ArenaGraph {
         // by NewTransactionWithOptions for every later trial in this pass.
         let existing_overlaps = self.existing_overlap_pairs();
         let existing_exact_overlaps = self.exact_overlap_pairs();
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_TRANSPOSE_EXISTING") {
+            eprintln!(
+                "TRANSPOSE_EXISTING_RUST count={} pairs={:?}",
+                existing_overlaps.len(),
+                existing_overlaps
+                    .iter()
+                    .filter_map(|(left, right)| {
+                        let left_id = self.nodes[left.0 as usize].tala_id;
+                        let right_id = self.nodes[right.0 as usize].tala_id;
+                        ((left_id == 560439961 && right_id == 510107104)
+                            || (left_id == 510107104 && right_id == 560439961))
+                            .then_some((left_id, right_id))
+                    })
+                    .collect::<Vec<_>>()
+            );
+        }
         let mut swap_made = false;
         for node in nodes.iter().copied() {
             if node_to_tree.contains(&node)
@@ -1312,6 +1337,16 @@ impl ArenaGraph {
             }
 
             if let Some((candidate, smart)) = best {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_SWAP") {
+                    eprintln!(
+                        "SWAP_ACCEPT_RUST node={} candidate={} smart={} global={} local={}",
+                        self.nodes[node.0 as usize].tala_id,
+                        self.nodes[candidate.0 as usize].tala_id,
+                        smart,
+                        best_global,
+                        current_local,
+                    );
+                }
                 if smart {
                     self.smart_swap_positions(node, candidate);
                 } else {
@@ -1505,6 +1540,21 @@ impl ArenaGraph {
                 target.x = (target.x / self.cell_size).round() * self.cell_size;
                 target.y = (target.y / self.cell_size).round() * self.cell_size;
             }
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_ROTATE") {
+                let node_tala = self.nodes[node.0 as usize].tala_id;
+                let center_tala = self.nodes[center.0 as usize].tala_id;
+                eprintln!(
+                    "ROTATE_RUST node={} center={} pos={:?} size={:?} center_pos={:?} center_size={:?} target={:?} round={}",
+                    node_tala,
+                    center_tala,
+                    position,
+                    size,
+                    center_position,
+                    center_size,
+                    target,
+                    round_to_cell
+                );
+            }
             self.move_active_node_abs_with_children(node, target);
         }
     }
@@ -1522,6 +1572,16 @@ impl ArenaGraph {
     ) -> bool {
         let node = self.active_aggregate_owner(node);
         let node_ref = &self.nodes[node.0 as usize];
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_TRANSPOSE_START")
+            && matches!(node_ref.tala_id, 510107104 | 560439961)
+        {
+            eprintln!(
+                "TRANSPOSE_START_RUST node={} pos={:?} edges={}",
+                node_ref.tala_id,
+                self.active_node_position(node),
+                self.active_edge_ids(node).len()
+            );
+        }
         let node_to_tree = routing::routing_tree_nodes(self);
         let node_edges = self.active_edge_ids(node);
         // Recovered Graph.transpose rejects a node that participates in any
@@ -1604,10 +1664,12 @@ impl ArenaGraph {
             {
                 return false;
             }
-            // The release asks for both named orientation locals using the
-            // first adjacent node. Preserve that source behavior: a diagonal
-            // second branch does not independently veto the transpose.
-            if self.sized_orientation(node, adjacent[0]).is_diagonal() {
+            // Both branches must be orthogonal before a transpose is
+            // admissible. TALA checks each adjacent orientation before it
+            // computes reachability or opens the candidate transaction.
+            if self.sized_orientation(node, adjacent[0]).is_diagonal()
+                || self.sized_orientation(node, adjacent[1]).is_diagonal()
+            {
                 return false;
             }
             let mut branch_a_ignore = BTreeSet::from([node]);
@@ -1692,6 +1754,9 @@ impl ArenaGraph {
             .map(|node| (node.position, node.rect.size))
             .collect();
         let original_cluster_vessels = self.pending_cluster_vessel_positions.clone();
+        let original_external_containers = self.transaction_external_containers.clone();
+        let original_external_container_children =
+            self.transaction_external_container_children.clone();
         let original_external_aggregate_children =
             self.transaction_external_aggregate_children.clone();
         let original_projected_adjacent_overrides = self.sized_adjacent_overrides.clone();
@@ -1728,8 +1793,55 @@ impl ArenaGraph {
                 && !spacing_became_exact
                 && containment_valid
                 && external_containers_valid;
+            if crate::engine::trace_env_value("WEFTAN_TRACE_TRANSPOSE_BOXES")
+                .is_some_and(|target| target == self.nodes[node.0 as usize].tala_id.to_string())
+            {
+                let tracked = self
+                    .graph_node_order()
+                    .into_iter()
+                    .filter(|candidate| {
+                        let id = self.nodes[candidate.0 as usize].tala_id;
+                        id == self.nodes[node.0 as usize].tala_id
+                            || id == self.nodes[center.0 as usize].tala_id
+                            || self.nodes[candidate.0 as usize].is_container
+                    })
+                    .filter_map(|candidate| {
+                        Some((
+                            self.nodes[candidate.0 as usize].tala_id,
+                            self.nodes[candidate.0 as usize]
+                                .container
+                                .map(|parent| self.nodes[parent.0 as usize].tala_id),
+                            self.active_node_position(candidate)?,
+                            self.active_node_size(candidate),
+                        ))
+                    })
+                    .collect::<Vec<_>>();
+                eprintln!(
+                    "TRANSPOSE_BOXES_RUST node={} center={} rotations={} valid={} overlap={} exact={} containment={} external={} boxes={:?}",
+                    self.nodes[node.0 as usize].tala_id,
+                    self.nodes[center.0 as usize].tala_id,
+                    rotations,
+                    valid,
+                    has_new_overlap,
+                    spacing_became_exact,
+                    containment_valid,
+                    external_containers_valid,
+                    tracked
+                );
+            }
             if valid {
                 let length = transpose_length(self);
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_TRANSPOSE_CANDIDATES") {
+                    eprintln!(
+                        "TRANSPOSE_CANDIDATE_RUST node={} center={} rotations={} valid={} length={:.17} best={:.17}",
+                        self.nodes[node.0 as usize].tala_id,
+                        self.nodes[center.0 as usize].tala_id,
+                        rotations,
+                        valid,
+                        length,
+                        best_length
+                    );
+                }
                 // Exact geo.PrecisionCompare(length, bestLength,
                 // geo.PRECISION) < 0 semantics: a difference exactly equal
                 // to PRECISION is not considered equal.
@@ -1737,6 +1849,18 @@ impl ArenaGraph {
                     best_length = length;
                     best_rotations = Some(rotations);
                 }
+            }
+            if !valid && crate::engine::trace_env_enabled("WEFTAN_TRACE_TRANSPOSE_CANDIDATES") {
+                eprintln!(
+                    "TRANSPOSE_CANDIDATE_RUST node={} center={} rotations={} valid=false overlap={} exact={} containment={} external={}",
+                    self.nodes[node.0 as usize].tala_id,
+                    self.nodes[center.0 as usize].tala_id,
+                    rotations,
+                    has_new_overlap,
+                    spacing_became_exact,
+                    containment_valid,
+                    external_containers_valid
+                );
             }
             if local_edge_score {
                 // `Transaction.Rollback` restores active graph nodes in
@@ -1783,6 +1907,10 @@ impl ArenaGraph {
             }
             self.transaction_external_aggregate_children
                 .clone_from(&original_external_aggregate_children);
+            self.transaction_external_containers
+                .clone_from(&original_external_containers);
+            self.transaction_external_container_children
+                .clone_from(&original_external_container_children);
             self.sized_adjacent_overrides = original_projected_adjacent_overrides.clone();
             self.sized_edge_abductions = original_projected_edge_abductions.clone();
             self.sized_projected_obstructions = original_projected_obstructions.clone();
@@ -1796,7 +1924,47 @@ impl ArenaGraph {
         for moved in transpose_nodes {
             self.rotate_around(moved, center, rotations, local_edge_score);
         }
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_TRANSPOSE_RESULT") {
+            eprintln!(
+                "TRANSPOSE_RUST before-refit node={} center={} rotations={} moved={:?}",
+                self.nodes[node.0 as usize].tala_id,
+                self.nodes[center.0 as usize].tala_id,
+                rotations,
+                self.nodes
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.tala_id == 3826002220
+                            || candidate.tala_id == 3817582133
+                            || candidate.tala_id == 3767249276
+                            || candidate.tala_id == 3784026895
+                            || candidate.tala_id == 3860350673
+                            || candidate.tala_id == 3843573054
+                    })
+                    .map(|candidate| (candidate.tala_id, candidate.position, candidate.rect.size))
+                    .collect::<Vec<_>>()
+            );
+        }
         self.reposition_ordinary_containers();
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_TRANSPOSE_RESULT") {
+            eprintln!(
+                "TRANSPOSE_RUST after-refit node={} center={} rotations={} members={:?}",
+                self.nodes[node.0 as usize].tala_id,
+                self.nodes[center.0 as usize].tala_id,
+                rotations,
+                self.nodes
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.tala_id == 3826002220
+                            || candidate.tala_id == 3817582133
+                            || candidate.tala_id == 3767249276
+                            || candidate.tala_id == 3784026895
+                            || candidate.tala_id == 3860350673
+                            || candidate.tala_id == 3843573054
+                    })
+                    .map(|candidate| (candidate.tala_id, candidate.position, candidate.rect.size))
+                    .collect::<Vec<_>>()
+            );
+        }
         true
     }
 

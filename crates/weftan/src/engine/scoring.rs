@@ -170,7 +170,7 @@ impl ArenaGraph {
                     });
                 if let Some(projected) = projected {
                     let owner = self.position(projected.owner)?;
-                    if crate::engine::trace_env_enabled("WEFTAN_TRACE_MEDIAN_ADJACENTS") {
+                    if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_MEDIAN_ADJACENTS") {
                         eprintln!(
                             "MEDIAN_PROJECTED_RUST node={} child={} owner={} owner_pos={:?} offset={},{} size={},{} center={},{}",
                             self.nodes[node.0 as usize].tala_id,
@@ -193,6 +193,19 @@ impl ArenaGraph {
                 }
                 let position = self.position(candidate)?;
                 let size = self.active_node_size(candidate);
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_MEDIAN_ADJACENTS")
+                    && self.nodes[node.0 as usize].tala_id == 2_699_771_459
+                {
+                    eprintln!(
+                        "MEDIAN_RAW_RUST node={} candidate_index={} raw_id={} active_id={} raw_pos={:?} active_pos={:?}",
+                        self.nodes[node.0 as usize].tala_id,
+                        candidate.0,
+                        self.nodes[candidate.0 as usize].tala_id,
+                        self.active_node_tala_id(candidate),
+                        self.nodes[candidate.0 as usize].position,
+                        self.position(candidate),
+                    );
+                }
                 Some((
                     position.x + size.width * 0.5,
                     position.y + size.height * 0.5,
@@ -225,7 +238,7 @@ impl ArenaGraph {
                 y: (position.y + size.height * 0.5) / self.cell_size,
             };
         }
-        if crate::engine::trace_env_enabled("WEFTAN_TRACE_MEDIAN_ADJACENTS") {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_MEDIAN_ADJACENTS") {
             eprint!(
                 "MEDIAN_ADJ_RUST node={} ",
                 self.nodes[node.0 as usize].tala_id
@@ -3255,12 +3268,36 @@ impl ArenaGraph {
         restored_endpoints: Option<&[SizedRestoredEndpoints]>,
     ) -> f64 {
         let node_ref = &self.nodes[node.0 as usize];
+        let trace_flow_node = crate::engine::trace_env_value("WEFTAN_TRACE_FLOW_NODE");
+        let trace_flow = crate::engine::trace_env_enabled("WEFTAN_TRACE_FLOW_DETAIL")
+            && trace_flow_node.as_deref().is_none_or(|target| {
+                target == "all"
+                    || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id)
+            });
+        if trace_flow {
+            eprintln!(
+                "FLOW_GUARD_RUST node={} pos={} edges={} cluster={} sequence={} herd={} isContainer={} children={}",
+                self.nodes[node.0 as usize].tala_id,
+                self.position(node).is_some(),
+                active_edges.len(),
+                node_ref.cluster.is_some(),
+                node_ref.sequence.is_some(),
+                node_ref.herd_assignment.is_some(),
+                node_ref.is_container,
+                self.containers.get(&Some(node)).map_or(0, Vec::len),
+            );
+        }
         if self.position(node).is_none()
             || active_edges.len() < 2
             || active_edges.len() > 8
             || node_ref.cluster.is_some()
             || node_ref.sequence.is_some()
             || node_ref.herd_assignment.is_some()
+            // A placement scope may contain a container carrier without
+            // materializing its descendants in the temporary graph. OSS
+            // TALA still sees those descendants through Graph.Containers and
+            // therefore excludes the carrier from flow continuity scoring.
+            || node_ref.is_container
             || self
                 .containers
                 .get(&Some(node))
@@ -3303,6 +3340,17 @@ impl ArenaGraph {
                 .and_then(|endpoints| endpoints.get(edge_index))
                 .copied()
                 .unwrap_or_default();
+            if trace_flow {
+                eprintln!(
+                    "FLOW_RESTORED_RUST edge={} adjacent={} restoredNode={:?} restoredAdjacent={:?}",
+                    edge_id.0,
+                    self.nodes[self.active_adjacent(node, edge_id).0 as usize].tala_id,
+                    restored
+                        .node
+                        .map(|projected| self.nodes[projected.owner.0 as usize].tala_id),
+                    restored.adjacent.map(|projected| projected.tala_id),
+                );
+            }
             // OSS flowContinuityCost ignores an edge whose receiver endpoint
             // was replaced by an abducted original node (s.nRepl[i] != node).
             if restored.node.is_some() {
@@ -3320,6 +3368,10 @@ impl ArenaGraph {
                 };
                 (position, self.active_node_size(adjacent))
             };
+            // OSS flow continuity compares the replacement endpoint's own
+            // `Container` field. A projected member carries that field in
+            // `container_tala_id`; the active adjacent node is only the
+            // temporary carrier used for the edge topology.
             let adjacent_container = restored
                 .adjacent
                 .and_then(|projected| projected.container_tala_id)
@@ -3329,6 +3381,17 @@ impl ArenaGraph {
                 });
             if adjacent_container != node_container {
                 continue;
+            }
+            if trace_flow {
+                eprintln!(
+                    "FLOW_DETAIL_RUST adjacent={} nodeContainer={:?} adjacentContainer={:?} sourceArrow={} targetArrow={} restored={:?}",
+                    self.nodes[adjacent.0 as usize].tala_id,
+                    node_container,
+                    adjacent_container,
+                    edge.source_arrow,
+                    edge.target_arrow,
+                    restored,
+                );
             }
             let adjacent_center = Point {
                 x: adjacent_box.0.x + adjacent_box.1.width / 2.0,
@@ -3386,6 +3449,29 @@ impl ArenaGraph {
         let mut cost = if spine.is_finite() { spine } else { 0.0 };
         if branches > 0 {
             cost += branch_sum / branches as f64;
+        }
+        if trace_flow {
+            eprintln!(
+                "FLOW_RAYS_RUST node={} count={} spine={} branchSum={} branches={} turn={} cost={}",
+                self.nodes[node.0 as usize].tala_id,
+                rays.len(),
+                spine,
+                branch_sum,
+                branches,
+                self.turn_cost,
+                self.turn_cost * cost,
+            );
+            for (index, ray) in rays.iter().enumerate() {
+                eprintln!(
+                    "FLOW_RAY_RUST node={} index={} identity={} x={} y={} directions={}",
+                    self.nodes[node.0 as usize].tala_id,
+                    index,
+                    ray.identity,
+                    ray.x,
+                    ray.y,
+                    ray.directions,
+                );
+            }
         }
         self.turn_cost * cost
     }

@@ -271,9 +271,6 @@ impl Pipeline {
     /// initiate attempts; connectivity and the container-affecting
     /// transaction continue to observe the complete graph.
     pub(super) fn gap_normalization_stage(&mut self) -> bool {
-        if self.graph.is_uniform_flat_path() {
-            return false;
-        }
         let containers = self.graph.container_reverse_dfs_order();
         if std::env::var("WEFTAN_TRACE_GAP_CALL").is_ok() {
             eprintln!(
@@ -630,6 +627,17 @@ impl Pipeline {
             // hierarchy scope. Fixed bounds carry labels and render
             // modifiers; no graph-topology category is involved.
             let padding = self.graph.shape_fit_padding(container);
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_FIT_ALL") {
+                eprintln!(
+                    "FIT_ALL_RUST container={} old_size={:?} bounds={:?}->{:?} content={:?} padding={:?}",
+                    self.graph.nodes[container.0 as usize].tala_id,
+                    self.graph.nodes[container.0 as usize].rect.size,
+                    top_left,
+                    bottom_right,
+                    local_content,
+                    padding,
+                );
+            }
             self.graph.nodes[container.0 as usize].rect.size = self
                 .graph
                 .bin_pack_shape_dimensions_to_fit(container, local_content, padding);
