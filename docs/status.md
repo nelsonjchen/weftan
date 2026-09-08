@@ -11,8 +11,9 @@ diagnostic budget; five cases timed out or exceeded the oracle work limit.
 The full measurement is recorded in
 [`tala-parity-baseline.json`](tala-parity-baseline.json).
 
-The workspace test suite currently has 487 passing tests and 15 older exact
-recovery assertions that still fail while the OSS parity work is in progress.
+The Weftan engine suite currently has 487 passing tests and 15 older exact
+recovery assertions that still fail while the OSS parity work is in progress;
+the plugin protocol tests all pass.
 Those failures are kept visible rather than being changed to conceal the
 remaining implementation gaps.
 
