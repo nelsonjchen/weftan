@@ -11,7 +11,7 @@ diagnostic budget; five cases timed out or exceeded the oracle work limit.
 The full measurement is recorded in
 [`tala-parity-baseline.json`](tala-parity-baseline.json).
 
-The workspace test suite currently has 488 passing tests and 14 older exact
+The workspace test suite currently has 487 passing tests and 15 older exact
 recovery assertions that still fail while the OSS parity work is in progress.
 Those failures are kept visible rather than being changed to conceal the
 remaining implementation gaps.
