@@ -10,7 +10,7 @@ release_binary="$1"
 source_binary="$2"
 workspace="$(cd "$(dirname "$0")/.." && pwd)"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/weftan-d2-binary-compare.XXXXXX")"
-cleanup() { rm -rf "$tmp_root"; }
+cleanup() { find "$tmp_root" -depth -delete 2>/dev/null || true; }
 trap cleanup EXIT HUP INT TERM
 
 for input in \
