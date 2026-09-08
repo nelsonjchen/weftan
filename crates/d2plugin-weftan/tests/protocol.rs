@@ -73,6 +73,14 @@ fn removed_quality_option_is_rejected() {
 }
 
 #[test]
+fn malformed_graph_is_reported_on_stderr_without_protocol_output() {
+    let output = run(&["layout"], b"{not-json");
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("err:"));
+}
+
+#[test]
 fn layout_keeps_stdout_clean_and_accepts_empty_report_default() {
     let output = run(&["layout", "--weftan-report", ""], GRAPH.as_bytes());
     assert!(
