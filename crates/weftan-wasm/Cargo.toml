@@ -1,0 +1,24 @@
+[package]
+name = "weftan-wasm"
+description = "WebAssembly bindings for the Weftan graph layout engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+wasm-bindgen.workspace = true
+weftan.workspace = true
+weftan-d2.workspace = true
+
+# Enable validation of the WebAssembly instructions emitted by Rust.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]

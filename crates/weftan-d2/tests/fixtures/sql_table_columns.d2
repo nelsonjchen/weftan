@@ -1,0 +1,25 @@
+direction: right
+
+users: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  team_id: int {constraint: foreign_key}
+  manager_id: int {constraint: foreign_key}
+}
+
+teams: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  owner_id: int {constraint: foreign_key}
+  region_id: int {constraint: foreign_key}
+}
+
+regions: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  lead_id: int {constraint: foreign_key}
+}
+
+users.team_id -> teams.id
+users.manager_id -> teams.owner_id
+teams.region_id -> regions.id

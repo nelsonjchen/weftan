@@ -1,0 +1,19 @@
+{
+  "root": {
+    "AbsID": "",
+    "ChildrenArray": ["a", "b", "c"],
+    "attributes": {"direction": {"value": ""}},
+    "id": ""
+  },
+  "edges": [
+    {"Src": "a", "Dst": "b", "index": 0, "isCurve": false, "futureEdgeField": true},
+    {"Src": "b", "Dst": "c", "index": 0, "isCurve": false}
+  ],
+  "objects": [
+    {"AbsID": "a", "id": "a", "box": {"Width": 53, "Height": 66, "TopLeft": null}, "futureObjectField": 42},
+    {"AbsID": "b", "id": "b", "box": {"Width": 53, "Height": 66, "TopLeft": null}},
+    {"AbsID": "c", "id": "c", "box": {"Width": 53, "Height": 66, "TopLeft": null}}
+  ],
+  "rootLevel": 0,
+  "futureField": "preserve me"
+}
