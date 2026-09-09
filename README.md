@@ -12,6 +12,15 @@ the open-source TALA implementation shipped in D2 v0.9.0. The recovered Rust
 translation predates that publication and is not claimed to have been copied
 from the open-source release.
 
+## An experiment
+
+Weftan started as a fun experiment in recovering and reimplementing TALA in
+Rust. In end-to-end measurements it is slower than D2's built-in TALA,
+probably because Weftan runs as an external plugin and pays the process and
+protocol overhead on every layout. The experiment was still useful: it reached
+matching output on the current D2 v0.9.0 corpus and made the layout behavior
+something we could study directly.
+
 ![A Weftan route traveling around an obstacle](artifacts/comparison/routing-weftan-parity.svg)
 
 ## Quick start
