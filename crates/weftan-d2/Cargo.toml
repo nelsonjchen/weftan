@@ -1,0 +1,17 @@
+[package]
+name = "weftan-d2"
+description = "Lossless D2 binary-plugin adapter for Weftan"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+
+[dependencies]
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+weftan = { workspace = true, default-features = false }

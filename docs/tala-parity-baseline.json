@@ -1,0 +1,42 @@
+{
+  "schema": 3,
+  "measured_at": "2026-09-09",
+  "oracle": {
+    "name": "D2 bundled TALA",
+    "version": "v0.9.0",
+    "source_commit": "d5a51743b6d5c00f1ec6f8340003f5d5a6ba4eda",
+    "go_version": "go1.27.0",
+    "platform": "macos-arm64"
+  },
+  "candidate": {
+    "name": "Weftan",
+    "branch": "codex/oss-tala-parity"
+  },
+  "corpus": {
+    "input_cases": 121,
+    "seed": 1,
+    "dev_mode": true,
+    "jobs": 4,
+    "timeout_seconds": 120,
+    "successful_cases": 120,
+    "exact_cases": 120,
+    "error_cases": 1,
+    "boxes": {"exact": 2964, "total": 2964},
+    "routes": {"exact": 974, "total": 974},
+    "edge_labels": {"exact": 974, "total": 974},
+    "node_labels": {"exact": 2964, "total": 2964},
+    "node_icons": {"exact": 2964, "total": 2964}
+  },
+  "trace_witnesses": {
+    "identical": [
+      "crates/weftan-d2/tests/fixtures/simple.json",
+      "d2_e2e__e2etests_testdata_files_label_positions.graph.bin",
+      "d2_e2e_expanded__e2etests_testdata_files_icon_positions.graph.bin",
+      "d2_e2e__e2etests_testdata_files_all_shapes_link.graph.bin",
+      "d2_example__fixtures_layout_d2_examples_flipt_input.graph.bin"
+    ],
+    "first_remaining_divergence": null,
+    "error_match": "d2_e2e_expanded__e2etests_testdata_files_grid_large_checkered.graph.bin: identical TALA CombineSubgraphs work-limit error"
+  },
+  "interpretation": "Diagnostic baseline only; not a claim of universal equivalence."
+}

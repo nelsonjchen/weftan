@@ -1,0 +1,7 @@
+/target/
+*.tmp
+.DS_Store
+
+
+/crates/weftan-wasm/pkg/
+/SOURCE-REVISION.txt

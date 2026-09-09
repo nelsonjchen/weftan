@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="pipeline-title pipeline-desc" viewBox="0 0 920 300" style="max-width:920px;width:100%;height:auto;background:#fff;border-radius:8px">
+  <title id="pipeline-title">Weftan layout pipeline</title>
+  <desc id="pipeline-desc">Six connected stages transform a graph into selected node boxes, edge routes, labels, and diagnostics.</desc>
+  <defs>
+    <marker id="pipeline-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#465a78"/></marker>
+    <style>.p-box{fill:#eef4ff;stroke:#315ea8;stroke-width:2}.p-title{font:700 17px system-ui,sans-serif;fill:#13233a}.p-copy{font:14px system-ui,sans-serif;fill:#33445e}.p-step{font:700 13px system-ui,sans-serif;fill:#315ea8}.p-arrow{stroke:#465a78;stroke-width:2;marker-end:url(#pipeline-arrow)}</style>
+  </defs>
+  <g transform="translate(20 30)"><rect class="p-box" width="130" height="90" rx="10"/><text class="p-step" x="14" y="23">1 · MODEL</text><text class="p-title" x="14" y="49">Validate</text><text class="p-copy" x="14" y="72">stable arena</text></g>
+  <line class="p-arrow" x1="150" y1="75" x2="174" y2="75"/>
+  <g transform="translate(180 30)"><rect class="p-box" width="130" height="90" rx="10"/><text class="p-step" x="14" y="23">2 · STRUCTURE</text><text class="p-title" x="14" y="49">Recognize</text><text class="p-copy" x="14" y="72">scopes + carriers</text></g>
+  <line class="p-arrow" x1="310" y1="75" x2="334" y2="75"/>
+  <g transform="translate(340 30)"><rect class="p-box" width="130" height="90" rx="10"/><text class="p-step" x="14" y="23">3 · BOXES</text><text class="p-title" x="14" y="49">Place</text><text class="p-copy" x="14" y="72">fit + refine</text></g>
+  <line class="p-arrow" x1="470" y1="75" x2="494" y2="75"/>
+  <g transform="translate(500 30)"><rect class="p-box" width="130" height="90" rx="10"/><text class="p-step" x="14" y="23">4 · PATHS</text><text class="p-title" x="14" y="49">Route</text><text class="p-copy" x="14" y="72">ports + obstacles</text></g>
+  <line class="p-arrow" x1="630" y1="75" x2="654" y2="75"/>
+  <g transform="translate(660 30)"><rect class="p-box" width="130" height="90" rx="10"/><text class="p-step" x="14" y="23">5 · FINISH</text><text class="p-title" x="14" y="49">Label</text><text class="p-copy" x="14" y="72">normalize frame</text></g>
+  <path class="p-arrow" fill="none" d="M725 120v55H85v24"/>
+  <g transform="translate(20 205)"><rect class="p-box" width="770" height="70" rx="10"/><text class="p-step" x="14" y="23">6 · SELECT COMPLETE CANDIDATE</text><text class="p-title" x="14" y="50">LayoutResult = boxes + routes + labels + candidate report</text></g>
+  <g transform="translate(815 30)"><rect width="85" height="245" rx="10" fill="#f8fafc" stroke="#8391a6" stroke-width="2" stroke-dasharray="5 4"/><text class="p-step" x="13" y="27">PER SEED</text><text class="p-copy" transform="translate(30 215) rotate(-90)">independent graph copy and random stream</text></g>
+</svg>

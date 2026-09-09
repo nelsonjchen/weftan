@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="seed-title seed-desc" viewBox="0 0 860 300" style="max-width:860px;width:100%;height:auto;background:#fff;border-radius:8px">
+  <title id="seed-title">Complete candidate selection across three seeds</title>
+  <desc id="seed-desc">Three seeds each run the entire layout pipeline. Completed candidates enter one selector, which publishes one whole result.</desc>
+  <defs><marker id="seed-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#465a78"/></marker><style>.s-box{fill:#eef4ff;stroke:#315ea8;stroke-width:2}.s-win{fill:#e8f7ec;stroke:#27823f;stroke-width:3}.s-title{font:700 17px system-ui,sans-serif;fill:#13233a}.s-copy{font:14px system-ui,sans-serif;fill:#465a78}.s-arrow{stroke:#465a78;stroke-width:2;marker-end:url(#seed-arrow)}</style></defs>
+  <text class="s-title" x="25" y="30">ordered seeds</text>
+  <g transform="translate(25 50)"><rect class="s-box" width="180" height="58" rx="9"/><text class="s-title" x="16" y="25">seed 1</text><text class="s-copy" x="16" y="45">full pipeline → candidate</text></g>
+  <g transform="translate(25 122)"><rect class="s-box" width="180" height="58" rx="9"/><text class="s-title" x="16" y="25">seed 2</text><text class="s-copy" x="16" y="45">full pipeline → candidate</text></g>
+  <g transform="translate(25 194)"><rect class="s-box" width="180" height="58" rx="9"/><text class="s-title" x="16" y="25">seed 3</text><text class="s-copy" x="16" y="45">full pipeline → candidate</text></g>
+  <line class="s-arrow" x1="205" y1="79" x2="345" y2="132"/><line class="s-arrow" x1="205" y1="151" x2="345" y2="151"/><line class="s-arrow" x1="205" y1="223" x2="345" y2="170"/>
+  <g transform="translate(350 105)"><rect class="s-box" width="210" height="92" rx="9"/><text class="s-title" x="105" y="30" text-anchor="middle">completion set</text><text class="s-copy" x="105" y="54" text-anchor="middle">deadline + validation</text><text class="s-copy" x="105" y="75" text-anchor="middle">precision-aware score order</text></g>
+  <line class="s-arrow" x1="560" y1="151" x2="645" y2="151"/>
+  <g transform="translate(650 105)"><rect class="s-win" width="185" height="92" rx="9"/><text class="s-title" x="92" y="34" text-anchor="middle">one winner</text><text class="s-copy" x="92" y="58" text-anchor="middle">whole boxes + routes</text><text class="s-copy" x="92" y="77" text-anchor="middle">+ labels + report</text></g>
+  <text class="s-copy" x="430" y="275" text-anchor="middle">No averaging. No cross-candidate geometry mixing.</text>
+</svg>

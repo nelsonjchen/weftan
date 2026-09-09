@@ -1,0 +1,94 @@
+diff --git a/d2layouts/d2talalayout/internal/engine/pipeline.go b/d2layouts/d2talalayout/internal/engine/pipeline.go
+index fa3149d..1330768 100644
+--- a/d2layouts/d2talalayout/internal/engine/pipeline.go
++++ b/d2layouts/d2talalayout/internal/engine/pipeline.go
+@@ -4,7 +4,10 @@ import (
+ 	"context"
+ 	"encoding/json"
+ 	"fmt"
++	"math"
+ 	"math/rand"
++	"os"
++	"strconv"
+ 	"time"
+ 
+ 	"github.com/d2lang/d2/lib/label"
+@@ -34,6 +37,70 @@ type pipelineStage struct {
+ 	run  func(*pipeline, context.Context) error
+ }
+ 
++type normalizedTracePoint struct {
++	X string `json:"x_bits"`
++	Y string `json:"y_bits"`
++}
++
++type normalizedTraceNode struct {
++	ID string `json:"id"`
++	X string `json:"x_bits,omitempty"`
++	Y string `json:"y_bits,omitempty"`
++	W string `json:"w_bits"`
++	H string `json:"h_bits"`
++}
++
++type normalizedTraceEdge struct {
++	ID    string `json:"id"`
++	Index int `json:"index"`
++	From string `json:"from"`
++	To string `json:"to"`
++	Route []normalizedTracePoint `json:"route,omitempty"`
++}
++
++type normalizedTraceEvent struct {
++	Stage string `json:"stage"`
++	Event string `json:"event"`
++	Nodes []normalizedTraceNode `json:"nodes,omitempty"`
++	Edges []normalizedTraceEdge `json:"edges,omitempty"`
++}
++
++func traceFloat(value float64) string {
++	return fmt.Sprintf("0x%016x", math.Float64bits(value))
++}
++
++func (p *pipeline) emitNormalizedTrace(stage string) {
++	if os.Getenv("TALA_TRACE_JSONL") == "" {
++		return
++	}
++	event := normalizedTraceEvent{Stage: stage, Event: "stage"}
++	for _, node := range p.graph.Nodes {
++		if node == nil {
++			continue
++		}
++		traced := normalizedTraceNode{ID: node.DebugID(), W: traceFloat(node.Width), H: traceFloat(node.Height)}
++		if node.TopLeft != nil {
++			traced.X = traceFloat(node.TopLeft.X)
++			traced.Y = traceFloat(node.TopLeft.Y)
++		}
++		event.Nodes = append(event.Nodes, traced)
++	}
++	for index, edge := range p.graph.Edges {
++		if edge == nil {
++			continue
++		}
++		traced := normalizedTraceEdge{ID: strconv.FormatInt(int64(edge.ID), 10), Index: index, From: edge.From.DebugID(), To: edge.To.DebugID()}
++		for _, point := range edge.Points {
++			traced.Route = append(traced.Route, normalizedTracePoint{X: traceFloat(point.X), Y: traceFloat(point.Y)})
++		}
++		event.Edges = append(event.Edges, traced)
++	}
++	encoded, err := json.Marshal(event)
++	if err == nil {
++		fmt.Fprintln(os.Stderr, string(encoded))
++	}
++}
++
+ type routingSnapshot struct {
+ 	ovg   *routing.OVG
+ 	graph *layoutgraph.Graph
+@@ -432,6 +499,7 @@ func (p *pipeline) runAllStages(ctx context.Context) error {
+ 		if err := stage.run(p, ctx); err != nil {
+ 			return err
+ 		}
++		p.emitNormalizedTrace(stage.name)
+ 		if err := ctx.Err(); err != nil {
+ 			return fmt.Errorf("%s: %w", stage.name, err)
+ 		}

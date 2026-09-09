@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace --locked
+      - run: cargo build --release --locked -p d2plugin-weftan
+      - name: Verify license files
+        run: node scripts/sync-licenses.mjs --check
+      - name: Record corresponding source
+        shell: bash
+        run: echo "https://github.com/nelsonjchen/weftan/tree/$GITHUB_SHA" > SOURCE-REVISION.txt
+      - name: Package Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          archive="d2plugin-weftan-${{ runner.os }}-${{ runner.arch }}.tar.gz"
+          tar -czf "$archive" LICENSE THIRD_PARTY_NOTICES.md DEPENDENCY_NOTICES.md SOURCE.md SOURCE-REVISION.txt -C target/release d2plugin-weftan
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path target/release/d2plugin-weftan.exe,LICENSE,THIRD_PARTY_NOTICES.md,DEPENDENCY_NOTICES.md,SOURCE.md,SOURCE-REVISION.txt -DestinationPath d2plugin-weftan-Windows-${{ runner.arch }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d2plugin-weftan-${{ runner.os }}-${{ runner.arch }}
+          path: d2plugin-weftan-*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Write checksums
+        run: cd dist && sha256sum * > SHA256SUMS
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag

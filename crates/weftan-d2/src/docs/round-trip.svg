@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="d2-title d2-desc" viewBox="0 0 900 300" style="max-width:900px;width:100%;height:auto;background:#fff;border-radius:8px">
+  <title id="d2-title">Lossless D2 adapter round trip</title>
+  <desc id="d2-desc">One generic JSON tree preserves every field while a separate typed graph visits the layout engine and returns only owned geometry updates.</desc>
+  <defs><marker id="d2-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#465a78"/></marker><style>.d-box{fill:#eef4ff;stroke:#315ea8;stroke-width:2}.d-tree{fill:#fff7e9;stroke:#a46500;stroke-width:2}.d-title{font:700 17px system-ui,sans-serif;fill:#13233a}.d-copy{font:14px system-ui,sans-serif;fill:#465a78}.d-arrow{stroke:#465a78;stroke-width:2;marker-end:url(#d2-arrow)}.d-return{fill:none;stroke:#27823f;stroke-width:3;marker-end:url(#d2-arrow)}</style></defs>
+  <g transform="translate(20 35)"><rect class="d-tree" width="180" height="210" rx="10"/><text class="d-title" x="90" y="32" text-anchor="middle">JSON value tree</text><text class="d-copy" x="16" y="65">known fields</text><text class="d-copy" x="16" y="90">unknown fields</text><text class="d-copy" x="16" y="115">application data</text><text class="d-copy" x="16" y="140">original ordering</text><text class="d-copy" x="16" y="178">retained throughout</text></g>
+  <line class="d-arrow" x1="200" y1="90" x2="300" y2="90"/>
+  <g transform="translate(305 45)"><rect class="d-box" width="170" height="90" rx="10"/><text class="d-title" x="85" y="32" text-anchor="middle">Typed Graph</text><text class="d-copy" x="85" y="58" text-anchor="middle">layout-relevant facts</text></g>
+  <line class="d-arrow" x1="475" y1="90" x2="575" y2="90"/>
+  <g transform="translate(580 45)"><rect class="d-box" width="180" height="90" rx="10"/><text class="d-title" x="90" y="32" text-anchor="middle">Weftan Engine</text><text class="d-copy" x="90" y="58" text-anchor="middle">boxes + routes + labels</text></g>
+  <path class="d-return" d="M670 135V220H205"/>
+  <text class="d-copy" x="450" y="211" text-anchor="middle">write back only layout-owned geometry</text>
+  <line class="d-arrow" x1="200" y1="230" x2="820" y2="230"/>
+  <text class="d-title" x="820" y="218" text-anchor="end">serialized D2 JSON</text><text class="d-copy" x="820" y="250" text-anchor="end">unknown fields unchanged</text>
+</svg>

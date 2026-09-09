@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="routing-title routing-desc" viewBox="0 0 820 280" style="max-width:820px;width:100%;height:auto;background:#fff;border-radius:8px">
+  <title id="routing-title">Orthogonal routing around an obstacle</title>
+  <desc id="routing-desc">An edge leaves a source port, follows visibility lanes below a blocking rectangle, and enters a target port.</desc>
+  <defs><marker id="route-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#2457a6"/></marker><style>.r-node{fill:#eef4ff;stroke:#315ea8;stroke-width:2}.r-obstacle{fill:#fff2df;stroke:#b26a00;stroke-width:2}.r-guide{stroke:#a8b4c5;stroke-width:1.5;stroke-dasharray:6 5}.r-path{fill:none;stroke:#2457a6;stroke-width:5;stroke-linejoin:round;marker-end:url(#route-arrow)}.r-port{fill:#2457a6}.r-text{font:700 17px system-ui,sans-serif;fill:#13233a}.r-note{font:14px system-ui,sans-serif;fill:#465a78}</style></defs>
+  <rect class="r-node" x="30" y="80" width="140" height="90" rx="8"/><text class="r-text" x="100" y="130" text-anchor="middle">source</text>
+  <rect class="r-obstacle" x="320" y="50" width="170" height="140" rx="8"/><text class="r-text" x="405" y="118" text-anchor="middle">obstacle</text><text class="r-note" x="405" y="143" text-anchor="middle">visibility blocked</text>
+  <rect class="r-node" x="650" y="80" width="140" height="90" rx="8"/><text class="r-text" x="720" y="130" text-anchor="middle">target</text>
+  <line class="r-guide" x1="170" y1="220" x2="650" y2="220"/><line class="r-guide" x1="170" y1="125" x2="650" y2="125"/>
+  <circle class="r-port" cx="170" cy="125" r="7"/><circle class="r-port" cx="650" cy="125" r="7"/>
+  <path class="r-path" d="M170 125L250 125L250 220L570 220L570 125L642 125"/>
+  <text class="r-note" x="410" y="253" text-anchor="middle">chosen visibility corridor · bends and length contribute to cost</text>
+</svg>

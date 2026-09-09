@@ -1,0 +1,48 @@
+[workspace]
+members = [
+    "crates/weftan",
+    "crates/weftan-d2",
+    "crates/weftan-wasm",
+    "crates/d2plugin-weftan",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MPL-2.0"
+authors = ["Nelson Chen"]
+repository = "https://github.com/nelsonjchen/weftan"
+
+[workspace.dependencies]
+base64 = "0.22"
+mimalloc = { version = "0.1", default-features = false }
+rayon = "1.11"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+thiserror = "2.0"
+wasm-bindgen = "0.2"
+weftan = { version = "0.1.0", path = "crates/weftan", default-features = false }
+weftan-d2 = { version = "0.1.0", path = "crates/weftan-d2" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+# Keep the everyday edit/build loop cheap while retaining source locations in
+# panics and backtraces.
+[profile.dev]
+debug = "line-tables-only"
+
+# The recovered optimizer deliberately evaluates many candidate placements.
+# Use this profile for oracle/corpus validation, where runtime dominates rebuild
+# latency. Ordinary development builds intentionally remain unoptimized.
+[profile.oracle]
+inherits = "dev"
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug-assertions = false
+overflow-checks = false

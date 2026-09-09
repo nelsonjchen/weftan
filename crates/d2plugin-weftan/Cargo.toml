@@ -1,0 +1,24 @@
+[package]
+name = "d2plugin-weftan"
+description = "D2 binary plugin for the Weftan graph-layout engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+
+[features]
+diagnostic-traces = ["weftan/diagnostic-traces"]
+
+[[bin]]
+name = "d2plugin-weftan"
+path = "src/main.rs"
+
+[dependencies]
+mimalloc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+weftan = { workspace = true, default-features = false }
+weftan-d2.workspace = true
