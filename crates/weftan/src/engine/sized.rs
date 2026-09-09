@@ -639,8 +639,7 @@ impl<'a> SizedOptimizer<'a> {
             points.push(self.graph.position(node).unwrap());
         }
         if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_POINTS")
-            && std::env::var("WEFTAN_TRACE_SIZED_POINTS")
-                .ok()
+            && crate::engine::trace_env_value("WEFTAN_TRACE_SIZED_POINTS")
                 .as_deref()
                 .is_some_and(|target| {
                     target == "all"
@@ -1084,8 +1083,7 @@ impl<'a> SizedOptimizer<'a> {
         let minimum = self.closest_unoccupied_distance(node, median, minimizing_self, checked);
         let mut points = self.placements(node, median, minimum, minimizing_self);
         if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_RAW")
-            && std::env::var("WEFTAN_TRACE_SIZED_NODE")
-                .ok()
+            && crate::engine::trace_env_value("WEFTAN_TRACE_SIZED_NODE")
                 .as_deref()
                 .is_some_and(|target| {
                     target == "all"
@@ -1292,8 +1290,7 @@ impl<'a> SizedOptimizer<'a> {
             }
             let mut points = self.placements(node, median, minimum, minimizing_self);
             if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_RAW")
-                && std::env::var("WEFTAN_TRACE_SIZED_NODE")
-                    .ok()
+                && crate::engine::trace_env_value("WEFTAN_TRACE_SIZED_NODE")
                     .as_deref()
                     .is_some_and(|target| {
                         target == "all"
@@ -1339,8 +1336,7 @@ impl<'a> SizedOptimizer<'a> {
                 eprintln!();
             }
             if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_SHUFFLED")
-                && std::env::var("WEFTAN_TRACE_SIZED_NODE")
-                    .ok()
+                && crate::engine::trace_env_value("WEFTAN_TRACE_SIZED_NODE")
                     .as_deref()
                     .is_some_and(|target| {
                         target == "all"

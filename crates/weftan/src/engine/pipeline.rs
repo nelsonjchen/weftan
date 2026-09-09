@@ -173,7 +173,7 @@ impl Pipeline {
                 );
             }
         }
-        if std::env::var("WEFTAN_TRACE_ROOT_CHILDREN").is_ok() {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_ROOT_CHILDREN") {
             eprint!("ROOT_CHILDREN_RUST stage={stage}");
             for child in self.graph.containers.get(&None).into_iter().flatten() {
                 eprint!(" {}", self.graph.nodes[child.0 as usize].tala_id);

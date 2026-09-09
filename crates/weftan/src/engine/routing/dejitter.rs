@@ -36,9 +36,8 @@ pub(in crate::engine) fn dejitter(graph: &mut ArenaGraph) -> bool {
 
     for node_id in node_ids {
         let node_index = node_id.0 as usize;
-        let trace_node = std::env::var("WEFTAN_TRACE_DEJITTER_NODE")
-            .ok()
-            .is_some_and(|raw| {
+        let trace_node =
+            crate::engine::trace_env_value("WEFTAN_TRACE_DEJITTER_NODE").is_some_and(|raw| {
                 raw == "all"
                     || raw
                         .parse::<u64>()

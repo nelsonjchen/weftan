@@ -371,8 +371,7 @@ impl ArenaGraph {
         let all_nodes: Vec<_> = self.nodes.iter().map(|node| node.input_id).collect();
         let mut changed = false;
         let trace_compaction = !horizontal
-            && std::env::var("WEFTAN_TRACE_COMPACTION_MEMBER")
-                .ok()
+            && crate::engine::trace_env_value("WEFTAN_TRACE_COMPACTION_MEMBER")
                 .and_then(|value| value.parse::<u64>().ok())
                 .is_some_and(|target| self.nodes.iter().any(|node| node.tala_id == target));
 
@@ -571,9 +570,7 @@ impl ArenaGraph {
 
     pub(super) fn compact_sized_axis(&mut self, horizontal: bool, factor: f64) {
         if !horizontal
-            && std::env::var("WEFTAN_TRACE_COMPACTION_MEMBER")
-                .ok()
-                .is_some()
+            && crate::engine::trace_env_value("WEFTAN_TRACE_COMPACTION_MEMBER").is_some()
             && self.nodes.iter().any(|node| node.tala_id == 1028623761)
         {
             eprintln!(
@@ -585,9 +582,7 @@ impl ArenaGraph {
         let visibility = self.visibility_edges(horizontal, true);
         if !horizontal
             && (factor == 1.0 || factor == 2.074626865671642)
-            && std::env::var("WEFTAN_TRACE_COMPACTION_MEMBER")
-                .ok()
-                .is_some()
+            && crate::engine::trace_env_value("WEFTAN_TRACE_COMPACTION_MEMBER").is_some()
             && self.nodes.iter().any(|node| node.tala_id == 1028623761)
         {
             eprint!("COMPACTION_BEFORE_INFLATE_RUST ");
@@ -600,9 +595,7 @@ impl ArenaGraph {
         self.inflate_sized_axis(horizontal, factor, &visibility);
         if !horizontal
             && (factor == 1.0 || factor == 2.074626865671642)
-            && std::env::var("WEFTAN_TRACE_COMPACTION_MEMBER")
-                .ok()
-                .is_some()
+            && crate::engine::trace_env_value("WEFTAN_TRACE_COMPACTION_MEMBER").is_some()
             && self.nodes.iter().any(|node| node.tala_id == 1028623761)
         {
             eprint!("COMPACTION_AFTER_INFLATE_RUST ");

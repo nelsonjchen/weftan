@@ -591,8 +591,7 @@ impl ArenaGraph {
         let to = self.active_aggregate_owner(edge_ref.to);
         let start = self.center(from);
         let end = self.center(to);
-        let trace = std::env::var("WEFTAN_TRACE_ALIGN_INTERSECTIONS")
-            .ok()
+        let trace = crate::engine::trace_env_value("WEFTAN_TRACE_ALIGN_INTERSECTIONS")
             .map(|target| {
                 let mut ids = target.split('>');
                 let left = ids.next().and_then(|id| id.parse::<u64>().ok());
@@ -900,7 +899,9 @@ impl ArenaGraph {
                     .unwrap_or_else(|| {
                         self.transaction_has_bad_state_overlap(&original_state.existing_overlaps)
                     });
-                if let Ok(target) = std::env::var("WEFTAN_TRACE_ALIGN_VALIDATION") {
+                if let Some(target) =
+                    crate::engine::trace_env_value("WEFTAN_TRACE_ALIGN_VALIDATION")
+                {
                     let mut parts = target.split('>');
                     let from = parts.next().and_then(|id| id.parse::<u64>().ok());
                     let to = parts.next().and_then(|id| id.parse::<u64>().ok());

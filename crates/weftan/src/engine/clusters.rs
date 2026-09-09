@@ -508,9 +508,8 @@ impl ArenaGraph {
     }
 
     fn refit_cluster_container_preserving_origin(&mut self, cluster_index: usize) {
-        let trace_refit = std::env::var("WEFTAN_TRACE_CLUSTER_REFIT")
-            .ok()
-            .is_some_and(|target| {
+        let trace_refit =
+            crate::engine::trace_env_value("WEFTAN_TRACE_CLUSTER_REFIT").is_some_and(|target| {
                 target == "all" || target == self.clusters[cluster_index].vessel_tala_id.to_string()
             });
         let Some(first_member) = self.clusters[cluster_index].members.first().copied() else {
@@ -622,7 +621,7 @@ impl ArenaGraph {
         let vessel = trial.cluster_bounds(&cluster.members)?;
         let horizontally = cluster.arrangement == ClusterArrangement::Row;
 
-        if std::env::var("WEFTAN_TRACE_CLUSTER_FLIP").ok().as_deref() == Some("all") {
+        if crate::engine::trace_env_value("WEFTAN_TRACE_CLUSTER_FLIP").as_deref() == Some("all") {
             eprintln!(
                 "CLUSTER_ALIGN_RUST vessel={} trial={} external={:?} vessel_rect={:?} baseline={}",
                 cluster.vessel_tala_id,
@@ -662,7 +661,8 @@ impl ArenaGraph {
                     y: (average_center.y / count - vessel.center().y).round(),
                 }
             };
-            if std::env::var("WEFTAN_TRACE_CLUSTER_FLIP").ok().as_deref() == Some("all") {
+            if crate::engine::trace_env_value("WEFTAN_TRACE_CLUSTER_FLIP").as_deref() == Some("all")
+            {
                 eprintln!(
                     "CLUSTER_DELTA_RUST vessel={} trial=vessel delta={:?} pending_before={:?}",
                     cluster.vessel_tala_id, delta, trial.pending_cluster_vessel_positions,
@@ -704,7 +704,7 @@ impl ArenaGraph {
         }
 
         trial.reposition_ordinary_containers();
-        if std::env::var("WEFTAN_TRACE_CLUSTER_FLIP").ok().as_deref() == Some("all") {
+        if crate::engine::trace_env_value("WEFTAN_TRACE_CLUSTER_FLIP").as_deref() == Some("all") {
             eprintln!(
                 "CLUSTER_ALIGN_RUST vessel={} trial={} length={} reject={}",
                 cluster.vessel_tala_id,
@@ -755,7 +755,7 @@ impl ArenaGraph {
     /// portions of `Cluster.optimize(ctx, false)`.
     pub(super) fn optimize_clusters(&mut self) -> bool {
         let mut changed = false;
-        if std::env::var("WEFTAN_TRACE_CLUSTER_FLIP").ok().as_deref() == Some("all") {
+        if crate::engine::trace_env_value("WEFTAN_TRACE_CLUSTER_FLIP").as_deref() == Some("all") {
             eprintln!(
                 "CLUSTER_META_RUST root_container={:?} node_order={:?}",
                 self.containers
@@ -805,7 +805,8 @@ impl ArenaGraph {
             }
         }
         for cluster_index in self.cluster_reverse_dfs_order() {
-            if std::env::var("WEFTAN_TRACE_CLUSTER_FLIP").ok().as_deref() == Some("all") {
+            if crate::engine::trace_env_value("WEFTAN_TRACE_CLUSTER_FLIP").as_deref() == Some("all")
+            {
                 let cluster = &self.clusters[cluster_index];
                 let external = self.cluster_external_nodes(cluster_index);
                 eprintln!(
@@ -868,7 +869,8 @@ impl ArenaGraph {
                     true,
                 );
             }
-            if std::env::var("WEFTAN_TRACE_CLUSTER_FLIP").ok().as_deref() == Some("all") {
+            if crate::engine::trace_env_value("WEFTAN_TRACE_CLUSTER_FLIP").as_deref() == Some("all")
+            {
                 eprint!(
                     "CLUSTER_AFTER_RUST vessel={} changed={} ",
                     self.clusters[cluster_index].vessel_tala_id, changed
@@ -1504,7 +1506,8 @@ impl ArenaGraph {
             .transaction_external_containers_are_valid_with_exceptions(&prior_external_overlaps);
         if containment_invalid || external_invalid {
             if crate::engine::trace_env_enabled("WEFTAN_TRACE_CLUSTER_FLIP")
-                && std::env::var("WEFTAN_TRACE_CLUSTER_FLIP").ok().as_deref() == Some("all")
+                && crate::engine::trace_env_value("WEFTAN_TRACE_CLUSTER_FLIP").as_deref()
+                    == Some("all")
             {
                 eprintln!(
                     "CLUSTER_TRIAL_RUST vessel={} arrangement={:?} center={} prior_size={:?} next_size={:?} rejects=bad:false spacing:false containment:{} external:{}",
@@ -1529,7 +1532,7 @@ impl ArenaGraph {
         let spacing_exact =
             trial.projected_transaction_spacing_overlap_became_exact(&prior_transaction_state);
         if crate::engine::trace_env_enabled("WEFTAN_TRACE_CLUSTER_FLIP")
-            && std::env::var("WEFTAN_TRACE_CLUSTER_FLIP").ok().as_deref() == Some("all")
+            && crate::engine::trace_env_value("WEFTAN_TRACE_CLUSTER_FLIP").as_deref() == Some("all")
         {
             eprintln!(
                 "CLUSTER_TRIAL_RUST vessel={} arrangement={:?} center={} prior_size={:?} next_size={:?} rejects=bad:{} spacing:{} containment:{} external:{}",
@@ -1559,7 +1562,7 @@ impl ArenaGraph {
     ) -> Option<ClusterArrangement> {
         let desired = self.projected_cluster_desired_arrangement(node, projection.arrangement);
         if crate::engine::trace_env_enabled("WEFTAN_TRACE_CLUSTER_FLIP")
-            && std::env::var("WEFTAN_TRACE_CLUSTER_FLIP").ok().as_deref() == Some("all")
+            && crate::engine::trace_env_value("WEFTAN_TRACE_CLUSTER_FLIP").as_deref() == Some("all")
         {
             eprintln!(
                 "CLUSTER_FLIP_RUST vessel={} current={:?} desired={:?} size={:?} position={:?} edges={:?}",
@@ -1728,7 +1731,8 @@ impl ArenaGraph {
             else {
                 continue;
             };
-            let trace = std::env::var("WEFTAN_TRACE_SYNC_CLUSTER").unwrap_or_default();
+            let trace =
+                crate::engine::trace_env_value("WEFTAN_TRACE_SYNC_CLUSTER").unwrap_or_default();
             let traced = trace == "all"
                 || trace
                     .parse::<u64>()

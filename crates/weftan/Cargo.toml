@@ -10,7 +10,7 @@ repository.workspace = true
 readme = "../../README.md"
 
 [features]
-default = ["diagnostic-traces"]
+default = []
 diagnostic-traces = []
 
 [dependencies]

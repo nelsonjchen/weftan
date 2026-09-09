@@ -41,8 +41,14 @@ not resumable checkpoints.
 
 ## Diagnostic traces
 
-The default `diagnostic-traces` feature retains environment-controlled trace
-probes used during compatibility work. The `weftan-d2` and plugin crates depend
-on the engine with default features disabled, so ordinary protocol output is
-not polluted by development traces. Regardless of feature selection, plugin
-stdout is reserved for protocol JSON.
+The opt-in `diagnostic-traces` feature retains environment-controlled trace
+probes used during compatibility work. Normal builds compile those probes out;
+the `weftan-d2` and plugin crates also depend on the engine with default
+features disabled. Regardless of feature selection, plugin stdout is reserved
+for protocol JSON.
+
+Enable the feature only for an oracle comparison or a focused debugging build:
+
+```sh
+cargo build -p d2plugin-weftan --features diagnostic-traces
+```

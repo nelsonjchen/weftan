@@ -411,12 +411,9 @@ impl ArenaGraph {
                 y: child_position.y - owner_position.y,
             };
             if trace_reconcile
-                && (std::env::var("WEFTAN_TRACE_PROJECTED_RECONCILE")
-                    .ok()
-                    .as_deref()
+                && (crate::engine::trace_env_value("WEFTAN_TRACE_PROJECTED_RECONCILE").as_deref()
                     == Some("all")
-                    || std::env::var("WEFTAN_TRACE_PROJECTED_RECONCILE")
-                        .ok()
+                    || crate::engine::trace_env_value("WEFTAN_TRACE_PROJECTED_RECONCILE")
                         .and_then(|target| target.parse::<u64>().ok())
                         == Some(projected.tala_id))
             {

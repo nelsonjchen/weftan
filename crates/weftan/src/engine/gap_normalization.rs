@@ -243,13 +243,10 @@ impl ArenaGraph {
             },
         );
         self.reposition_ordinary_containers();
-        if std::env::var("WEFTAN_TRACE_GAP_NODE")
-            .ok()
-            .is_some_and(|target| {
-                target == "all"
-                    || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id)
-            })
-        {
+        if crate::engine::trace_env_value("WEFTAN_TRACE_GAP_NODE").is_some_and(|target| {
+            target == "all"
+                || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id)
+        }) {
             let container = self.active_node_container(node);
             eprintln!(
                 "GAP_RUST_AFTER node={} pos={:?} size={},{} container={} cpos={:?} csize={:?}",
@@ -270,13 +267,10 @@ impl ArenaGraph {
             prior_active_boxes,
             prior_positions,
         );
-        if std::env::var("WEFTAN_TRACE_GAP_NODE")
-            .ok()
-            .is_some_and(|target| {
-                target == "all"
-                    || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id)
-            })
-        {
+        if crate::engine::trace_env_value("WEFTAN_TRACE_GAP_NODE").is_some_and(|target| {
+            target == "all"
+                || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id)
+        }) {
             eprintln!(
                 "GAP_RUST predicates amount={amount} max={} newOverlap={} spacingExact={} fixed={} containment={} external={}",
                 self.is_within_max_size(),
@@ -297,13 +291,10 @@ impl ArenaGraph {
         // current membership, rather than the pre-PlaceTrees snapshot used by
         // hierarchy construction scoring.
         let score = self.global_sized_edge_length_after_tree_restoration(false);
-        if std::env::var("WEFTAN_TRACE_GAP_NODE")
-            .ok()
-            .is_some_and(|target| {
-                target == "all"
-                    || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id)
-            })
-        {
+        if crate::engine::trace_env_value("WEFTAN_TRACE_GAP_NODE").is_some_and(|target| {
+            target == "all"
+                || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id)
+        }) {
             eprintln!(
                 "GAP_RUST inner trial amount={amount} valid={valid} score={score} baseline={baseline}"
             );
@@ -397,8 +388,8 @@ impl ArenaGraph {
         prior_active_boxes: &[(Option<Point>, Size)],
         prior_positions: &[Option<Point>],
     ) -> OrdinaryGapAttempt {
-        if std::env::var("WEFTAN_TRACE_GAP_NODE").is_ok()
-            && std::env::var("WEFTAN_TRACE_GAP_ENTRY").is_ok()
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_NODE")
+            && crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_ENTRY")
         {
             eprintln!(
                 "GAP_RUST_DIRECT_ENTRY node={} amount={amount} connected={}",
@@ -439,7 +430,7 @@ impl ArenaGraph {
                 trial = direct_state;
             }
         }
-        if std::env::var("WEFTAN_TRACE_GAP_ENTRY").is_ok() {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_ENTRY") {
             eprintln!(
                 "GAP_RUST_CHECK node={} amount={} score={candidate_score} score_bits={} old={old_score} old_bits={} mirror={mirror_accepted}",
                 self.nodes[node.0 as usize].tala_id,
@@ -464,13 +455,10 @@ impl ArenaGraph {
             prior_active_boxes,
             prior_positions,
         );
-        if std::env::var("WEFTAN_TRACE_GAP_NODE")
-            .ok()
-            .is_some_and(|target| {
-                target == "all"
-                    || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id)
-            })
-        {
+        if crate::engine::trace_env_value("WEFTAN_TRACE_GAP_NODE").is_some_and(|target| {
+            target == "all"
+                || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id)
+        }) {
             let moved = trial
                 .nodes
                 .iter()
@@ -514,9 +502,8 @@ impl ArenaGraph {
         horizontal: bool,
         forwards: bool,
     ) -> Option<NodeId> {
-        let trace_ahead = std::env::var("WEFTAN_TRACE_GAP_NODE")
-            .ok()
-            .is_some_and(|target| {
+        let trace_ahead =
+            crate::engine::trace_env_value("WEFTAN_TRACE_GAP_NODE").is_some_and(|target| {
                 target == "all"
                     || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id)
             });
@@ -693,9 +680,8 @@ impl ArenaGraph {
         prior_active_boxes: &[(Option<Point>, Size)],
         prior_positions: &[Option<Point>],
     ) -> (bool, f64) {
-        let trace_gap = std::env::var("WEFTAN_TRACE_GAP_NODE")
-            .ok()
-            .is_some_and(|target| {
+        let trace_gap =
+            crate::engine::trace_env_value("WEFTAN_TRACE_GAP_NODE").is_some_and(|target| {
                 target == "all"
                     || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id)
             });
@@ -764,7 +750,7 @@ impl ArenaGraph {
         }));
         let connected = self.connected_nodes_excluding(nearest, &excluded);
         let old_score = self.global_sized_edge_length_after_tree_restoration(false);
-        if std::env::var("WEFTAN_TRACE_GAP_ENTRY").is_ok() {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_ENTRY") {
             eprintln!(
                 "GAP_SCORE_MODE node={} restored={} plain={}",
                 self.nodes[node.0 as usize].tala_id,
@@ -1158,7 +1144,7 @@ impl ArenaGraph {
                         .cmp(&self.active_node_tala_id(*right))
                 })
         });
-        if std::env::var("WEFTAN_TRACE_GAP_ORDER").is_ok() {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_ORDER") {
             eprintln!(
                 "GAP_ORDER_RUST horizontal={} forwards={} {}",
                 horizontal,
@@ -1209,7 +1195,7 @@ impl ArenaGraph {
                 .map(|candidate| candidate.position)
                 .collect::<Vec<_>>();
             let before = self.active_node_position(node);
-            if std::env::var("WEFTAN_TRACE_GRID_GAP").is_ok() {
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_GRID_GAP") {
                 let tracked = [1149337423_u64, 1782109120_u64];
                 if self.nodes[node.0 as usize].tala_id == 498183754 {
                     eprintln!(
@@ -1281,7 +1267,7 @@ impl ArenaGraph {
                     }
                 }
             }
-            if std::env::var("WEFTAN_TRACE_GRID_GAP_FIRST").is_ok()
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_GRID_GAP_FIRST")
                 && self.nodes[node.0 as usize].tala_id == 658_979_808
             {
                 let tracked_ids = [
@@ -1380,7 +1366,7 @@ impl ArenaGraph {
             // here; syncing first makes an active aggregate's stale carrier
             // participate in the refit that is currently being validated.
             self.reposition_ordinary_containers_without_sync();
-            if std::env::var("WEFTAN_TRACE_GRID_GAP").is_ok() {
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_GRID_GAP") {
                 let tracked = [1149337423_u64, 1782109120_u64];
                 for tala_id in tracked {
                     if let Some(tracked_node) = self
@@ -1417,7 +1403,7 @@ impl ArenaGraph {
                     );
                 }
             }
-            if std::env::var("WEFTAN_TRACE_GRID_GAP_FIRST").is_ok()
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_GRID_GAP_FIRST")
                 && self.nodes[node.0 as usize].tala_id == 658_979_808
             {
                 let tracked_ids = [
@@ -1508,7 +1494,7 @@ impl ArenaGraph {
                 &prior_positions,
             ) {
                 changed = true;
-                if std::env::var("WEFTAN_TRACE_GAP_ORDER").is_ok() {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_ORDER") {
                     eprintln!(
                         "GAP_NODE_RUST node={} before={:?} after={:?} committed=true",
                         self.nodes[node.0 as usize].tala_id,
@@ -1517,7 +1503,7 @@ impl ArenaGraph {
                     );
                 }
             } else {
-                if std::env::var("WEFTAN_TRACE_GAP_ORDER").is_ok() {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_ORDER") {
                     eprintln!(
                         "GAP_NODE_RUST node={} before={:?} after={:?} committed=false",
                         self.nodes[node.0 as usize].tala_id,

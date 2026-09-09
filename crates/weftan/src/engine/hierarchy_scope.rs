@@ -1370,15 +1370,15 @@ impl Pipeline {
                     });
                 if let Some((offset, size, cluster_member)) = geometry {
                     if crate::engine::trace_env_enabled("WEFTAN_TRACE_PROJECT_BUILD")
-                        && std::env::var("WEFTAN_TRACE_PROJECT_BUILD")
-                            .ok()
-                            .is_some_and(|target| {
+                        && crate::engine::trace_env_value("WEFTAN_TRACE_PROJECT_BUILD").is_some_and(
+                            |target| {
                                 target == "all"
                                     || target.parse::<u64>().ok()
                                         == Some(
                                             self.graph.nodes[original.source.0 as usize].tala_id,
                                         )
-                            })
+                            },
+                        )
                     {
                         let mut source_chain = Vec::new();
                         let mut source_cursor = Some(original.source);
@@ -1457,15 +1457,15 @@ impl Pipeline {
                     });
                 if let Some((offset, size, cluster_member)) = geometry {
                     if crate::engine::trace_env_enabled("WEFTAN_TRACE_PROJECT_BUILD")
-                        && std::env::var("WEFTAN_TRACE_PROJECT_BUILD")
-                            .ok()
-                            .is_some_and(|target| {
+                        && crate::engine::trace_env_value("WEFTAN_TRACE_PROJECT_BUILD").is_some_and(
+                            |target| {
                                 target == "all"
                                     || target.parse::<u64>().ok()
                                         == Some(
                                             self.graph.nodes[original.target.0 as usize].tala_id,
                                         )
-                            })
+                            },
+                        )
                     {
                         let mut target_chain = Vec::new();
                         let mut target_cursor = Some(original.target);
@@ -2073,11 +2073,10 @@ impl Pipeline {
         };
         let project_external_node = |node: &ArenaNode| {
             let mut external = node.clone();
-            let trace_scope_external = std::env::var("WEFTAN_TRACE_SCOPE_EXTERNAL")
-                .ok()
-                .is_some_and(|target| {
-                    target == "all" || target.parse::<u64>().ok() == Some(node.tala_id)
-                });
+            let trace_scope_external =
+                crate::engine::trace_env_value("WEFTAN_TRACE_SCOPE_EXTERNAL").is_some_and(
+                    |target| target == "all" || target.parse::<u64>().ok() == Some(node.tala_id),
+                );
             let mut current = node.container;
             let mut correction = Point::default();
             while let Some(container) = current {
@@ -2166,11 +2165,10 @@ impl Pipeline {
             let active_position = self.graph.active_node_position(node_id);
             let parent = self.graph.active_node_container(node_id);
             let mut node = self.graph.nodes[node_id.0 as usize].clone();
-            let trace_active_projection = std::env::var("WEFTAN_TRACE_ACTIVE_PROJECTION")
-                .ok()
-                .is_some_and(|target| {
-                    target == "all" || target.parse::<u64>().ok() == Some(node.tala_id)
-                });
+            let trace_active_projection =
+                crate::engine::trace_env_value("WEFTAN_TRACE_ACTIVE_PROJECTION").is_some_and(
+                    |target| target == "all" || target.parse::<u64>().ok() == Some(node.tala_id),
+                );
             if trace_active_projection {
                 eprintln!(
                     "ACTIVE_PROJECTION_RUST before node={} raw_pos={:?} active_pos={:?} parent={:?} parent_pos={:?} translation={:?}",
@@ -2500,7 +2498,7 @@ impl Pipeline {
                     (cluster.vessel_tala_id, &cluster.members)
                 }
             };
-            if let Some(target) = std::env::var("WEFTAN_AGGREGATE_TARGET").ok()
+            if let Some(target) = crate::engine::trace_env_value("WEFTAN_AGGREGATE_TARGET")
                 && target != "all"
                 && target.parse::<u64>().ok() != Some(vessel_tala_id)
             {
@@ -2552,7 +2550,7 @@ impl Pipeline {
                         })
                     });
                     let size = geometry.map(|(_, size)| size);
-                    if let Some(trace_target) = std::env::var("WEFTAN_TRACE_MOVE_PROJECTION").ok()
+                    if let Some(trace_target) = crate::engine::trace_env_value("WEFTAN_TRACE_MOVE_PROJECTION")
                         && (trace_target == "all"
                             || trace_target.parse::<u64>().ok()
                                 == Some(self.graph.nodes[member.0 as usize].tala_id))
@@ -2587,7 +2585,7 @@ impl Pipeline {
         }
         if crate::engine::trace_env_enabled("WEFTAN_TRACE_MOVE_PROJECTION") {
             for node in &self.graph.nodes {
-                let trace_target = std::env::var("WEFTAN_TRACE_MOVE_PROJECTION").ok();
+                let trace_target = crate::engine::trace_env_value("WEFTAN_TRACE_MOVE_PROJECTION");
                 if trace_target.as_deref() == Some("all")
                     || trace_target
                         .as_deref()
@@ -2609,7 +2607,7 @@ impl Pipeline {
                 }
             }
             for (index, cluster) in self.graph.clusters.iter().enumerate() {
-                let trace_target = std::env::var("WEFTAN_TRACE_MOVE_PROJECTION").ok();
+                let trace_target = crate::engine::trace_env_value("WEFTAN_TRACE_MOVE_PROJECTION");
                 if trace_target.as_deref() == Some("all")
                     || trace_target
                         .as_deref()
@@ -3328,16 +3326,15 @@ impl Pipeline {
                 // Keep the shared container pointers aligned at this boundary
                 // even though the hierarchy's own coordinates are already
                 // arranged by PlaceHierarchies.
-                if std::env::var("WEFTAN_TRACE_HIERARCHY_SYNC")
-                    .ok()
-                    .is_some_and(|target| {
+                if crate::engine::trace_env_value("WEFTAN_TRACE_HIERARCHY_SYNC").is_some_and(
+                    |target| {
                         target == "all"
                             || target
                                 == scope.graph.nodes[hierarchy_node.0 as usize]
                                     .tala_id
                                     .to_string()
-                    })
-                {
+                    },
+                ) {
                     eprintln!(
                         "HIERARCHY_SYNC_RUST before node={} children={:?}",
                         scope.graph.nodes[hierarchy_node.0 as usize].tala_id,
@@ -3352,16 +3349,15 @@ impl Pipeline {
                     );
                 }
                 scope.graph.sync_nested_projected_container_children();
-                if std::env::var("WEFTAN_TRACE_HIERARCHY_SYNC")
-                    .ok()
-                    .is_some_and(|target| {
+                if crate::engine::trace_env_value("WEFTAN_TRACE_HIERARCHY_SYNC").is_some_and(
+                    |target| {
                         target == "all"
                             || target
                                 == scope.graph.nodes[hierarchy_node.0 as usize]
                                     .tala_id
                                     .to_string()
-                    })
-                {
+                    },
+                ) {
                     eprintln!(
                         "HIERARCHY_SYNC_RUST after node={} children={:?}",
                         scope.graph.nodes[hierarchy_node.0 as usize].tala_id,
@@ -3572,9 +3568,7 @@ impl Pipeline {
                         .and_then(|metadata| metadata.parent_tala_id)
                 );
             }
-            if std::env::var("WEFTAN_TRACE_POSITION_CHILDREN")
-                .ok()
-                .as_deref()
+            if crate::engine::trace_env_value("WEFTAN_TRACE_POSITION_CHILDREN").as_deref()
                 == Some("1472025070")
             {
                 eprintln!(

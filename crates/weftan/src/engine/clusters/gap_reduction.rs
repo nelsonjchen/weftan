@@ -298,8 +298,9 @@ impl ArenaGraph {
         );
 
         let old_length = self.global_sized_edge_length_with_direction(false);
-        let trace_gap_target = std::env::var("WEFTAN_TRACE_CLUSTER_GAP").ok();
-        let trace_gap = std::env::var("WEFTAN_TRACE_CLUSTER_FLIP").ok().as_deref() == Some("all")
+        let trace_gap_target = crate::engine::trace_env_value("WEFTAN_TRACE_CLUSTER_GAP");
+        let trace_gap = crate::engine::trace_env_value("WEFTAN_TRACE_CLUSTER_FLIP").as_deref()
+            == Some("all")
             && trace_gap_target.as_deref().is_some_and(|target| {
                 target == "all" || target == self.clusters[cluster_index].vessel_tala_id.to_string()
             });

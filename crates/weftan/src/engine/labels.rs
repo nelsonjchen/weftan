@@ -912,13 +912,10 @@ fn score_candidate(
         node_overlap_count,
         shared_segment_overlaps,
     );
-    if std::env::var("WEFTAN_TRACE_LABEL_EDGE")
-        .ok()
-        .is_some_and(|value| {
-            value == edge_index.to_string()
-                || edge.label.as_ref().is_some_and(|label| label.text == value)
-        })
-    {
+    if crate::engine::trace_env_value("WEFTAN_TRACE_LABEL_EDGE").is_some_and(|value| {
+        value == edge_index.to_string()
+            || edge.label.as_ref().is_some_and(|label| label.text == value)
+    }) {
         eprintln!(
             "LABEL_SCORE_RUST edge={} position={:?} node_area={} node_count={} edge_count={} exact={} almost={} shared={} area={} score={}",
             edge_index,
@@ -1252,9 +1249,8 @@ fn place_edge_labels_in_order(
         let label = graph.edges[edge_index].label.as_ref().unwrap();
         let initial_position = label.position;
         let initial_percentage = label.percentage;
-        let trace_label = std::env::var("WEFTAN_TRACE_LABEL_EDGE")
-            .ok()
-            .is_some_and(|value| {
+        let trace_label =
+            crate::engine::trace_env_value("WEFTAN_TRACE_LABEL_EDGE").is_some_and(|value| {
                 value == edge_index.to_string()
                     || graph.edges[edge_index]
                         .label

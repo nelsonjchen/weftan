@@ -280,7 +280,7 @@ impl Pipeline {
     /// transaction continue to observe the complete graph.
     pub(super) fn gap_normalization_stage(&mut self) -> bool {
         let containers = self.graph.container_reverse_dfs_order();
-        if std::env::var("WEFTAN_TRACE_GAP_CALL").is_ok() {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_CALL") {
             eprintln!(
                 "GAP_ROOT_CHILDREN_RUST {:?}",
                 self.graph
@@ -304,7 +304,7 @@ impl Pipeline {
         let mut changed = false;
         for container in containers {
             let descendants = self.graph.active_descendants(container);
-            if std::env::var("WEFTAN_TRACE_GAP_CALL").is_ok() {
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_CALL") {
                 eprintln!(
                     "GAP_CONTAINER_RUST id={} descendants={}",
                     self.graph.nodes[container.0 as usize].tala_id,
@@ -312,7 +312,7 @@ impl Pipeline {
                 );
             }
             for horizontal in [true, false] {
-                if std::env::var("WEFTAN_TRACE_GAP_CALL").is_ok() {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_CALL") {
                     eprintln!(
                         "GAP_CALL_RUST_BEFORE container={} horizontal={} tracked={:?}",
                         self.graph.nodes[container.0 as usize].tala_id,
@@ -328,7 +328,7 @@ impl Pipeline {
                 changed |= self
                     .graph
                     .gap_normalization_pass_for(&descendants, horizontal, true);
-                if std::env::var("WEFTAN_TRACE_GAP_CALL").is_ok() {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_CALL") {
                     let root = self.graph.nodes.first().unwrap();
                     eprintln!(
                         "GAP_CALL_RUST container={} horizontal={} forwards=true root={:?}:{},{} tracked={:?}",
@@ -348,7 +348,7 @@ impl Pipeline {
                 changed |= self
                     .graph
                     .gap_normalization_pass_for(&descendants, horizontal, false);
-                if std::env::var("WEFTAN_TRACE_GAP_CALL").is_ok() {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_CALL") {
                     let root = self.graph.nodes.first().unwrap();
                     eprintln!(
                         "GAP_CALL_RUST container={} horizontal={} forwards=false root={:?}:{},{} tracked={:?}",
@@ -373,7 +373,7 @@ impl Pipeline {
         // pass and can accept a different sequence of gap trials.
         let nodes = self.graph.graph_node_order();
         for horizontal in [true, false] {
-            if std::env::var("WEFTAN_TRACE_GAP_CALL").is_ok() {
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_CALL") {
                 eprintln!(
                     "GAP_CALL_RUST_BEFORE container=all horizontal={} tracked={:?}",
                     horizontal,
@@ -392,14 +392,14 @@ impl Pipeline {
                 .graph
                 .gap_normalization_pass_for(&nodes, horizontal, false);
         }
-        if std::env::var("WEFTAN_TRACE_GAP_CALL").is_ok() {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_CALL") {
             let root = self.graph.nodes.first().unwrap();
             eprintln!(
                 "GAP_CALL_RUST container=all root={:?}:{},{}",
                 root.position, root.rect.size.width, root.rect.size.height
             );
         }
-        if std::env::var("WEFTAN_TRACE_GAP_SYNC").is_ok() {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_SYNC") {
             eprintln!(
                 "GAP_BEFORE_SYNC_RUST {:?}",
                 self.graph
@@ -422,7 +422,7 @@ impl Pipeline {
                 .sync_clusters_from_positions(&cluster_vessel_positions);
         }
         self.graph.refresh_turn_cost_after_gap_normalization();
-        if std::env::var("WEFTAN_TRACE_GAP_SYNC").is_ok() {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_GAP_SYNC") {
             eprintln!(
                 "GAP_AFTER_SYNC_RUST {:?}",
                 self.graph
@@ -472,9 +472,7 @@ impl Pipeline {
                 .get(&Some(container))
                 .cloned()
                 .unwrap_or_default();
-            if std::env::var("WEFTAN_TRACE_RECURSIVE_CHILDREN")
-                .ok()
-                .as_deref()
+            if crate::engine::trace_env_value("WEFTAN_TRACE_RECURSIVE_CHILDREN").as_deref()
                 == Some("1472025070")
             {
                 eprintln!(
@@ -715,13 +713,14 @@ impl Pipeline {
                         y: container_origin.y + inside.y + position.y - top_left.y,
                     }
                 };
-                let trace_copyback = std::env::var("WEFTAN_TRACE_HIERARCHY_COPYBACK")
-                    .ok()
-                    .is_some_and(|target| {
-                        target == "all"
-                            || target == self.graph.nodes[container.0 as usize].tala_id.to_string()
-                            || target == self.graph.nodes[child.0 as usize].tala_id.to_string()
-                    });
+                let trace_copyback = crate::engine::trace_env_value(
+                    "WEFTAN_TRACE_HIERARCHY_COPYBACK",
+                )
+                .is_some_and(|target| {
+                    target == "all"
+                        || target == self.graph.nodes[container.0 as usize].tala_id.to_string()
+                        || target == self.graph.nodes[child.0 as usize].tala_id.to_string()
+                });
                 if trace_copyback {
                     eprintln!(
                         "HIERARCHY_COPYBACK_RUST container={} child={} container_pos={:?} top_left={:?} inside={:?} scope_pos={:?} target={:?} stable_before={:?}",
@@ -1184,8 +1183,7 @@ impl Pipeline {
             .unwrap_or_default()
         {
             let local = placement.old_to_new[&old];
-            let trace_root_copyback = std::env::var("WEFTAN_TRACE_ROOT_COPYBACK")
-                .ok()
+            let trace_root_copyback = crate::engine::trace_env_value("WEFTAN_TRACE_ROOT_COPYBACK")
                 .is_some_and(|target| {
                     target == "all"
                         || target.parse::<u64>().ok()

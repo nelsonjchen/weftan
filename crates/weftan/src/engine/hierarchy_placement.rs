@@ -398,7 +398,7 @@ impl HierarchyPlacement {
         // `createPlacementNodes` shuffles every returned sibling slice, not
         // only the top-level roots. Singleton slices consume no random value.
         rng.shuffle(&mut placements);
-        if std::env::var_os("WEFTAN_TRACE_HIER_ORDER").is_some() && placements.len() > 1 {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_HIER_ORDER") && placements.len() > 1 {
             eprintln!(
                 "HIER_SHUFFLE_RUST len={} ids={:?}",
                 placements.len(),

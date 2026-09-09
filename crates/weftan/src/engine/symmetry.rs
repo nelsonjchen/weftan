@@ -355,7 +355,7 @@ impl ArenaGraph {
                 continue;
             }
             let reachable_nodes = self.reachable_without(adjacent, &excluded, true);
-            if let Ok(target) = std::env::var("WEFTAN_TRACE_EQ_REACHABLE")
+            if let Some(target) = crate::engine::trace_env_value("WEFTAN_TRACE_EQ_REACHABLE")
                 && (target == "all"
                     || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id))
             {
@@ -530,7 +530,7 @@ impl ArenaGraph {
             } else {
                 !graph.has_node_overlaps()
             };
-            if let Ok(target) = std::env::var("WEFTAN_TRACE_EQ_SCORE")
+            if let Some(target) = crate::engine::trace_env_value("WEFTAN_TRACE_EQ_SCORE")
                 && (target == "all" || target.parse::<u64>().ok() == Some(trace_node_id))
             {
                 eprintln!(
@@ -565,7 +565,7 @@ impl ArenaGraph {
         let connected_score = (connected_nodes.len() > 1)
             .then(|| score_move(self, &connected_nodes))
             .flatten();
-        if let Ok(target) = std::env::var("WEFTAN_TRACE_EQ_DECISION")
+        if let Some(target) = crate::engine::trace_env_value("WEFTAN_TRACE_EQ_DECISION")
             && (target == "all"
                 || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id))
         {
@@ -621,7 +621,7 @@ impl ArenaGraph {
                 }
             }
         }
-        if let Ok(target) = std::env::var("WEFTAN_TRACE_EQUIDISTANCE")
+        if let Some(target) = crate::engine::trace_env_value("WEFTAN_TRACE_EQUIDISTANCE")
             && (target == "all"
                 || target.parse::<u64>().ok() == Some(self.nodes[node.0 as usize].tala_id))
         {

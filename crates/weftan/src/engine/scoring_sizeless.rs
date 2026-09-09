@@ -337,8 +337,7 @@ impl ArenaGraph {
                 return;
             }
             let candidates = graph.node_candidate_positions(node, seed);
-            let trace_initialize = std::env::var("WEFTAN_TRACE_INITIALIZE_NODE")
-                .ok()
+            let trace_initialize = crate::engine::trace_env_value("WEFTAN_TRACE_INITIALIZE_NODE")
                 .and_then(|value| value.parse::<u64>().ok())
                 == Some(graph.nodes[node.0 as usize].tala_id);
             if trace_initialize {

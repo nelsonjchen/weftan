@@ -183,7 +183,7 @@ fn movement_bounds(
             continue;
         }
         let locked_coordinate = segment_coordinate(locked_segment, vertical);
-        if std::env::var_os("WEFTAN_TRACE_BALANCE_DETAIL").is_some()
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_BALANCE_DETAIL")
             && vertical
             && ((coordinate - 1024.0).abs() < 0.1
                 || (coordinate - 1064.0).abs() < 0.1
@@ -313,7 +313,7 @@ fn check_balance_order(
             }
             if (old < position) != (proposed[batch_position] < position) {
                 order = BalanceOrder::Reversed;
-                if std::env::var_os("WEFTAN_TRACE_BALANCE_DETAIL").is_some() {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_BALANCE_DETAIL") {
                     eprintln!(
                         "BALANCE_RUST_REVERSE batch={} other={} old={} proposed={} position={} vertical={vertical}",
                         segment_index, other_index, old, proposed[batch_position], position
@@ -567,7 +567,7 @@ pub(in crate::engine) fn balance_regular_edges(
                     })
                     .collect();
                 let values = evenly_distribute(min_range.0, min_range.1, distinct.len());
-                if std::env::var_os("WEFTAN_TRACE_BALANCE_DETAIL").is_some() {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_BALANCE_DETAIL") {
                     eprintln!(
                         "BALANCE_RUST_BATCH vertical={vertical} range={:?} batch={:?} values={:?} coords={:?}",
                         min_range,
@@ -651,7 +651,7 @@ pub(in crate::engine) fn balance_regular_edges(
                     && batch.len() == 1
                     && proposed[0] < original[0];
                 let accept = order == BalanceOrder::Preserved || reversal_uncrosses;
-                if std::env::var_os("WEFTAN_TRACE_BALANCE_DETAIL").is_some() {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_BALANCE_DETAIL") {
                     eprintln!(
                         "BALANCE_RUST_ORDER vertical={vertical} range={:?} order={order:?} proposed={proposed:?}",
                         min_range
