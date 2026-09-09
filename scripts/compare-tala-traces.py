@@ -57,7 +57,9 @@ def read_trace(stderr: bytes) -> list[dict]:
     return events
 
 
-def run(command: list[str], source: bytes, environment: dict[str, str]) -> tuple[list[dict], str | None]:
+def run(
+    command: list[str], source: bytes, environment: dict[str, str]
+) -> tuple[list[dict], object | None, str | None]:
     try:
         result = subprocess.run(
             command,
@@ -68,10 +70,14 @@ def run(command: list[str], source: bytes, environment: dict[str, str]) -> tuple
             env={**os.environ, **environment},
         )
     except subprocess.TimeoutExpired:
-        return [], "timeout after 120s"
+        return [], None, "timeout after 120s"
     if result.returncode:
-        return [], result.stderr.decode(errors="replace")[-1000:]
-    return read_trace(result.stderr), None
+        return [], None, result.stderr.decode(errors="replace")[-1000:]
+    try:
+        public = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        public = result.stdout.decode(errors="replace")
+    return read_trace(result.stderr), public, None
 
 
 def normalize_ids(events: list[dict], rust: bool, ids: dict[str, str]) -> None:
@@ -99,8 +105,12 @@ def normalize_ids(events: list[dict], rust: bool, ids: dict[str, str]) -> None:
             edge["from"] = normalize_entity_id(edge["from"])
             edge["to"] = normalize_entity_id(edge["to"])
         event["nodes"] = sorted(event.get("nodes", []), key=lambda node: node["id"])
+        # The Go hash ID and Rust serialized ID use different allocation
+        # orders for parallel edges. The normalized trace already carries the
+        # stable input edge index, so use that within an endpoint pair before
+        # assigning the cross-language occurrence number.
         edges = sorted(
-            event.get("edges", []), key=lambda edge: (edge["from"], edge["to"], edge.get("id", ""), edge["index"])
+            event.get("edges", []), key=lambda edge: (edge["from"], edge["to"], edge["index"])
         )
         occurrences: dict[tuple[str, str], int] = {}
         for edge in edges:
@@ -147,12 +157,12 @@ def main() -> int:
     parser.add_argument("--seed", default="1")
     args = parser.parse_args()
     source = args.graph.read_bytes()
-    tala, tala_error = run(
+    tala, tala_public, tala_error = run(
         [args.tala_oracle, "layout", "--tala-seeds", args.seed],
         source,
         {"TALA_TRACE_JSONL": "1"},
     )
-    weftan, weftan_error = run(
+    weftan, weftan_public, weftan_error = run(
         [args.weftan_plugin, "layout", "--weftan-seeds", args.seed],
         source,
         {"DEV_MODE": "1", "WEFTAN_TRACE_JSONL": "1"},
@@ -176,6 +186,11 @@ def main() -> int:
     if tala_error or weftan_error:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 1
+    public_difference = first_difference(tala_public, weftan_public, "public")
+    if public_difference:
+        result["public_divergence"] = public_difference
+    else:
+        result["public_identical"] = True
     for index, (left, right) in enumerate(zip(tala, weftan)):
         if left["stage"] != right["stage"]:
             result["first_divergence"] = {
@@ -193,7 +208,7 @@ def main() -> int:
         else:
             result["identical"] = True
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 0 if result.get("identical") else 1
+    return 0 if result.get("identical") and result.get("public_identical") else 1
 
 
 if __name__ == "__main__":

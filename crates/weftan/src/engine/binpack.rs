@@ -1001,6 +1001,7 @@ impl ArenaGraph {
         let Some((mut top_left, mut bottom_right)) = self.bin_pack_bounding_box(&children) else {
             return;
         };
+        let trace_wrap_detail = crate::engine::trace_env_enabled("WEFTAN_TRACE_BINPACK_DETAIL");
         // Node.wrapChildren calls expandForLabels after getFixedBoundingBox.
         // A label wider than a child expands both horizontal boundaries, but
         // only when that child's ordinary box touches the current left or
@@ -1045,6 +1046,19 @@ impl ArenaGraph {
                 y: top_left.y - placement.y,
             },
         );
+        if trace_wrap_detail {
+            eprintln!(
+                "BINPACK_WRAP_RUST node={} bounds=({},{:?})->({},{:?}) padding={:?} content={:?} fitted={:?}",
+                self.nodes[container.0 as usize].tala_id,
+                top_left.x,
+                top_left.y,
+                bottom_right.x,
+                bottom_right.y,
+                padding,
+                content,
+                fitted
+            );
+        }
     }
 
     /// Idiomatic stable-ID translation of recovered `Graph.BinPack` for one
@@ -1602,28 +1616,58 @@ impl ArenaGraph {
                         > old_position.unwrap_or_default().x + old_size.width
                     || new_position.y + new_size.height
                         > old_position.unwrap_or_default().y + old_size.height);
-            // The release's routed-container proof is deliberately
-            // fail-closed. Until every clipped segment and endpoint check is
-            // represented here, preserve the original routed box whenever
-            // wrapping changes either dimension; shrinking can otherwise
-            // silently discard a route segment before the next routing pass.
-            let routed_wrap_changed_size = edges_placed
-                && (new_size.width != old_size.width || new_size.height != old_size.height);
             let routed_wrap_changed_position = edges_placed
                 && (new_position.x != old_position.unwrap_or_default().x
                     || new_position.y != old_position.unwrap_or_default().y);
+            let routed_wrap_changed_size = edges_placed
+                && (new_size.width != old_size.width || new_size.height != old_size.height);
+            // The Go routed-container proof is conservative around direct
+            // attachments: a shrink is admissible only after it proves that
+            // every clipped incident route remains attached to the same
+            // sides. Preserve the original box until that proof is modeled;
+            // otherwise a later BinPack pass can move an endpoint onto a
+            // different border (notably image-position fixtures).
+            let direct_routed_attachment = edges_placed
+                && self.nodes[container.0 as usize]
+                    .edges
+                    .iter()
+                    .any(|edge_id| self.edges[edge_id.0 as usize].points.len() >= 2);
+            // Icon-bearing routed containers can have visible icon bounds
+            // outside the ordinary child boxes. The v0.9 routed-container
+            // proof keeps the original box when that shrink would invalidate
+            // the icon-owned boundary, while ordinary routed containers may
+            // use a valid proposed shrink.
             let wrapped_bad_state = self.bin_pack_wrapped_container_is_bad_state(container);
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_BINPACK_DETAIL") {
+                eprintln!(
+                    "BINPACK_DECISION_RUST container={} old_pos={:?} old_size={:?} new_pos={:?} new_size={:?} outside={} changed_size={} bad_state={}",
+                    self.nodes[container.0 as usize].tala_id,
+                    old_position,
+                    old_size,
+                    new_position,
+                    new_size,
+                    routed_wrap_outside_original,
+                    routed_wrap_changed_size,
+                    wrapped_bad_state
+                );
+            }
             if wrapped_bad_state {
                 *self = original_graph;
-            } else if routed_wrap_outside_original || routed_wrap_changed_size {
+            } else if direct_routed_attachment && routed_wrap_changed_size {
+                // Keep the accepted child translations and routes while
+                // restoring only the routed container box, matching TALA's
+                // KeepOriginalBox decision.
+                self.set_position(container, old_position.unwrap_or_default());
+                self.nodes[container.0 as usize].rect.size = old_size;
+            } else if routed_wrap_outside_original {
                 // TALA's routed-container KeepOriginalBox decision restores
                 // only the container box. The packed descendants and their
-                // translated routes remain part of the accepted transaction;
-                // restoring the whole arena here changes child order and
-                // geometry even though the oracle keeps them.
+                // translated routes remain part of the accepted transaction.
                 if routed_wrap_changed_position {
-                    // A routed root translated as part of the proposed box
-                    // also rolls its packed subtree back in the v0.9 path.
+                    // A moved root rolls back its complete packing
+                    // transaction; a same-position shrink restores only the
+                    // root box (the distinction is observable in nested
+                    // routed graphs).
                     *self = original_graph;
                 } else {
                     self.set_position(container, old_position.unwrap_or_default());
@@ -1677,6 +1721,20 @@ impl ArenaGraph {
     /// observable refinement used for graphs such as all_shapes_link.
     pub(super) fn apply_compound_flow(&mut self) -> bool {
         let roots = self.containers.get(&None).cloned().unwrap_or_default();
+        let trace_compound = crate::engine::trace_env_enabled("WEFTAN_TRACE_COMPOUND_DETAIL");
+        if trace_compound {
+            eprintln!(
+                "COMPOUND_BEFORE {:?}",
+                roots
+                    .iter()
+                    .map(|root| (
+                        self.nodes[root.0 as usize].tala_id,
+                        self.position(*root),
+                        self.nodes[root.0 as usize].rect.size
+                    ))
+                    .collect::<Vec<_>>()
+            );
+        }
         // Match the released v0.9 CompoundCandidate admission bounds. The
         // candidate is a bounded post-selection refinement; large graphs are
         // deliberately left on the ordinary pipeline path.
@@ -1684,13 +1742,6 @@ impl ArenaGraph {
             || self.edges.len() > 256
             || roots.len() < 3
             || roots.len() > 64
-            || roots.iter().any(|root| {
-                !self.nodes[root.0 as usize].is_container
-                    || self
-                        .containers
-                        .get(&Some(*root))
-                        .is_none_or(|children| children.is_empty())
-            })
             || self
                 .nodes
                 .iter()
@@ -1743,11 +1794,26 @@ impl ArenaGraph {
                 return false;
             };
             if from == to {
+                // The outer compound candidate is only meaningful when at
+                // least one detailed root keeps an internal edge. Plain
+                // root chains are already handled by the ordinary pipeline.
                 continue;
             }
             if adjacency.entry(from).or_default().insert(to) {
                 *indegree.entry(to).or_default() += 1;
             }
+        }
+        let detailed = self.edges.iter().any(|edge| {
+            let Some(&from) = owner.get(&edge.from) else {
+                return false;
+            };
+            let Some(&to) = owner.get(&edge.to) else {
+                return false;
+            };
+            from == to && self.nodes[from.0 as usize].is_container && edge.from != edge.to
+        });
+        if !detailed {
+            return false;
         }
         let mut undirected = BTreeMap::<NodeId, BTreeSet<NodeId>>::new();
         for (from, tos) in &adjacency {
@@ -1771,11 +1837,14 @@ impl ArenaGraph {
         // whose interfaces form a single flow. Fan-out/fan-in outer graphs
         // are scored against their ordinary routed candidate and must not be
         // compacted unconditionally here.
-        if adjacency.values().any(|targets| targets.len() > 1)
-            || indegree.values().any(|degree| *degree > 1)
-            || adjacency.len() != roots.len().saturating_sub(1)
-        {
-            return false;
+        let strict_backbone = !adjacency.values().any(|targets| targets.len() > 1)
+            && !indegree.values().any(|degree| *degree > 1)
+            && adjacency.len() == roots.len().saturating_sub(1);
+        if trace_compound {
+            eprintln!(
+                "COMPOUND_ADMISSION adjacency={:?} indegree={:?} detailed={} connected={:?} strict={}",
+                adjacency, indegree, detailed, connected, strict_backbone
+            );
         }
         let mut seen = BTreeSet::new();
         let mut queue = roots
@@ -1837,10 +1906,56 @@ impl ArenaGraph {
             }
         }
         if order.len() != roots.len() {
-            return false;
+            // A small cyclic outer graph is still admitted by the released
+            // hierarchy builder when its existing flow order resolves the
+            // cycle. Preserve that order deterministically for the rigid
+            // blocks instead of rejecting the candidate at indegree setup.
+            if strict_backbone {
+                return false;
+            }
+            order = roots.clone();
+            order.sort_by(|left, right| {
+                let left_pos = self.position(*left).unwrap_or_default();
+                let right_pos = self.position(*right).unwrap_or_default();
+                let left_axis = if flow_horizontal {
+                    left_pos.x
+                } else {
+                    left_pos.y
+                };
+                let right_axis = if flow_horizontal {
+                    right_pos.x
+                } else {
+                    right_pos.y
+                };
+                left_axis.total_cmp(&right_axis).then_with(|| {
+                    let left_cross = if flow_horizontal {
+                        left_pos.y
+                    } else {
+                        left_pos.x
+                    };
+                    let right_cross = if flow_horizontal {
+                        right_pos.y
+                    } else {
+                        right_pos.x
+                    };
+                    left_cross
+                        .total_cmp(&right_cross)
+                        .then_with(|| left.cmp(right))
+                })
+            });
         }
 
-        let gap = 90.0;
+        // hierarchy.PlaceCompound uses the same effective outer spacing as
+        // the released placement pass for this rigid-block arrangement.
+        let compound_level_count = order.len();
+        for (level, root) in order.iter().copied().enumerate() {
+            self.nodes[root.0 as usize].hierarchy = Some(HierarchyMembership {
+                id: usize::MAX,
+                scope: None,
+                level,
+                level_count: compound_level_count,
+            });
+        }
         let max_cross = order
             .iter()
             .map(|root| {
@@ -1854,21 +1969,30 @@ impl ArenaGraph {
             .fold(0.0, f64::max);
         let mut cursor = 0.0;
         let mut target = BTreeMap::new();
-        for (index, root) in order.into_iter().enumerate() {
+        let has_outer_label = self.edges.iter().any(|edge| {
+            let Some(label) = edge.label.as_ref() else {
+                return false;
+            };
+            label.size.width > 0.0 || label.size.height > 0.0
+        });
+        for (index, root) in order.iter().copied().enumerate() {
             let size = self.nodes[root.0 as usize].rect.size;
             let cross = if flow_horizontal {
                 ((max_cross - size.height) / 2.0).ceil()
             } else {
                 ((max_cross - size.width) / 2.0).ceil()
             };
-            // TALA's vertical compound fit rounds the accumulated cross-axis
-            // envelope up by one pixel between root vessels; horizontal flow
-            // keeps the exact cursor boundary (the Flipt chain is the
-            // smallest witness for that distinction).
-            let flow_position = if index == 0 || flow_horizontal {
+            let flow_position = if flow_horizontal {
                 cursor
+            } else if has_outer_label {
+                cursor
+                    - if !strict_backbone && index >= 2 {
+                        1.0
+                    } else {
+                        0.0
+                    }
             } else {
-                cursor + 1.0
+                cursor + (index + 1).div_ceil(2) as f64
             };
             target.insert(
                 root,
@@ -1889,7 +2013,35 @@ impl ArenaGraph {
             } else {
                 size.height
             };
-            cursor += gap;
+            if index + 1 < compound_level_count {
+                let next = order[index + 1];
+                let label_extent = self
+                    .edges
+                    .iter()
+                    .filter(|edge| {
+                        let from = owner.get(&edge.from).copied();
+                        let to = owner.get(&edge.to).copied();
+                        (from == Some(root) && to == Some(next))
+                            || (from == Some(next) && to == Some(root))
+                    })
+                    .filter_map(|edge| edge.label.as_ref())
+                    .map(|label| {
+                        if flow_horizontal {
+                            label.size.width
+                        } else {
+                            label.size.height
+                        }
+                    })
+                    .fold(0.0, f64::max);
+                if trace_compound {
+                    eprintln!(
+                        "COMPOUND_GAP root={} next={} extent={label_extent}",
+                        self.nodes[root.0 as usize].tala_id, self.nodes[next.0 as usize].tala_id
+                    );
+                }
+                let level_distance = (label_extent + 50.0).clamp(50.0, 300.0).round();
+                cursor += level_distance + 40.0;
+            }
         }
         for root in roots {
             let Some(current) = self.position(root) else {
@@ -1902,6 +2054,19 @@ impl ArenaGraph {
                     x: desired.x - current.x,
                     y: desired.y - current.y,
                 },
+            );
+        }
+        if trace_compound {
+            eprintln!(
+                "COMPOUND_AFTER {:?}",
+                self.nodes
+                    .iter()
+                    .filter_map(|node| node.position.map(|position| (
+                        node.tala_id,
+                        position,
+                        node.rect.size
+                    )))
+                    .collect::<Vec<_>>()
             );
         }
         true

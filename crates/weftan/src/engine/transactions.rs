@@ -252,6 +252,14 @@ impl ArenaGraph {
                 }
             }
             for (vessel_tala_id, member_tala_id, position) in aggregate_positions {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_OBJECT2")
+                    && vessel_tala_id == 6334824724549167320
+                {
+                    eprintln!(
+                        "OBJECT2_RECONCILE_SET_RUST member={} target={},{}",
+                        member_tala_id, position.x, position.y
+                    );
+                }
                 if let Some(member) = self
                     .transaction_external_aggregate_children
                     .get_mut(&vessel_tala_id)
@@ -817,6 +825,24 @@ impl ArenaGraph {
             }
         }
 
+        let trace_object2 = crate::engine::trace_env_enabled("WEFTAN_TRACE_OBJECT2")
+            && moved_tala_ids.iter().any(|id| {
+                matches!(
+                    id,
+                    6334824724549167320 | 185443821 | 3356053350 | 4053080803 | 1033547076
+                )
+            });
+        if trace_object2 {
+            eprintln!(
+                "OBJECT2_TRANSLATE_RUST caller={} roots={:?} delta={},{} moved={:?}",
+                std::panic::Location::caller(),
+                roots,
+                delta.x,
+                delta.y,
+                moved_tala_ids
+            );
+        }
+
         let translate_projected = |node: &mut ArenaNode| {
             if !moved_tala_ids.contains(&node.tala_id) {
                 return;
@@ -871,6 +897,18 @@ impl ArenaGraph {
                 position.x += delta.x;
                 position.y += delta.y;
             }
+        }
+        if trace_object2 {
+            let positions = self
+                .transaction_external_aggregate_children
+                .get(&6334824724549167320)
+                .map(|children| {
+                    children
+                        .iter()
+                        .map(|child| (child.tala_id, child.position))
+                        .collect::<Vec<_>>()
+                });
+            eprintln!("OBJECT2_TRANSLATE_RUST_AFTER {:?}", positions);
         }
     }
 
@@ -1028,6 +1066,20 @@ impl ArenaGraph {
     }
 
     pub(super) fn set_projected_node_position(&mut self, tala_id: u64, target: Point) {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_OBJECT2")
+            && matches!(
+                tala_id,
+                6334824724549167320 | 185443821 | 3356053350 | 4053080803 | 1033547076
+            )
+        {
+            eprintln!(
+                "OBJECT2_SET_RUST caller={} tala={} target={},{}",
+                std::panic::Location::caller(),
+                tala_id,
+                target.x,
+                target.y
+            );
+        }
         let anchor_positions = self
             .nodes
             .iter()

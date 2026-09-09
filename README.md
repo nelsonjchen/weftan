@@ -85,8 +85,9 @@ oracle over the checked-in serialized corpus.
 | Exact node icons across successful cases | **2,196 / 2,196** |
 
 The baseline records oracle timeout and malformed-input cases separately.
-Simple, label-position, icon-position, all-shapes, and flipt witnesses have
-byte-identical normalized traces; the five timeout or oracle-work-limit cases
+Simple, label-position, all-shapes, flipt, bipartite, and Twitter witnesses
+have byte-identical normalized traces; icon-position remains an explicit
+nested-placement divergence witness, and the five timeout or oracle-work-limit cases
 are recorded in
 [the dated measurement record](docs/tala-parity-baseline.json) and
 [status notes](docs/status.md). These are corpus measurements, not a claim

@@ -334,6 +334,18 @@ impl<'a> SizedOptimizer<'a> {
     }
 
     fn point_is_occupied(&self, node: NodeId, point: Point) -> bool {
+        // optimizerCanMove first performs Graph.isOccupied, which rejects an
+        // exact top-left collision even when the boxes do not overlap under
+        // the spacing predicate. Keep that identity check ahead of the
+        // dimension-aware overlap scan.
+        if self
+            .graph
+            .nodes
+            .iter()
+            .any(|other| other.input_id != node && other.position == Some(point))
+        {
+            return true;
+        }
         if self.graph.container_direction_is_unset(node) {
             let occupied = self.graph.sized_point_overlaps(node, point);
             if crate::engine::trace_env_enabled("WEFTAN_TRACE_OCCUPANCY")
@@ -398,6 +410,15 @@ impl<'a> SizedOptimizer<'a> {
                 && point.y < other_position.y + other.rect.size.height + delta
                 && point.y + node_size.height + delta > other_position.y
         })
+    }
+
+    /// Reproduce placement.optimizerCanMove for sized candidates.  The Go
+    /// path performs an exact-top-left occupancy check and then scans every
+    /// graph node with the 500px safe-delta guard before applying DeltaTo;
+    /// the search-time overlap helper is intentionally narrower and cannot be
+    /// used here without admitting candidates that Go rejects.
+    fn can_move_to(&self, node: NodeId, point: Point) -> bool {
+        !self.point_is_occupied(node, point)
     }
 
     fn search_point_is_occupied(&self, node: NodeId, point: Point) -> bool {
@@ -656,6 +677,8 @@ impl<'a> SizedOptimizer<'a> {
         let trace_move_always = crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_MOVE_ALWAYS");
         let trace_move = (crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_PASS_ACTIVE")
             || trace_move_always)
+            && (!crate::engine::trace_env_enabled("WEFTAN_TRACE_ROOT_ONLY")
+                || self.graph.nodes.len() == 15)
             && (trace_move_target.as_deref() == Some("all")
                 || trace_move_target.as_deref().is_some_and(|targets| {
                     targets.split(',').any(|target| {
@@ -708,8 +731,18 @@ impl<'a> SizedOptimizer<'a> {
         };
         let mut best = current;
         for point in points.iter().copied() {
-            if point != current && self.point_is_occupied(node, point) {
-                if trace_move {
+            if point != current && !self.can_move_to(node, point) {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_MOVE_ALWAYS")
+                    && crate::engine::trace_env_value("WEFTAN_TRACE_SIZED_MOVE_NODE").is_some_and(
+                        |target| {
+                            target == "all"
+                                || target.split(',').any(|target| {
+                                    target.parse::<u64>().ok()
+                                        == Some(self.graph.nodes[node.0 as usize].tala_id)
+                                })
+                        },
+                    )
+                {
                     eprintln!("SIZED_MOVE_RUST candidate={},{} rejected", point.x, point.y);
                 }
                 continue;
@@ -817,16 +850,25 @@ impl<'a> SizedOptimizer<'a> {
 
     fn overlaps_except(&self, node: NodeId, point: Point, ignored: &[NodeId]) -> bool {
         self.graph.nodes.iter().any(|other| {
-            if other.input_id == node
-                || ignored.contains(&other.input_id)
-                || !self.same_component(node, other.input_id)
-            {
+            if other.input_id == node || ignored.contains(&other.input_id) {
                 return false;
             }
             let Some(other_position) = other.position else {
                 return false;
             };
             let node_size = self.graph.nodes[node.0 as usize].rect.size;
+            // D2's optimizerDoesOverlap first applies a broad 500px
+            // prefilter, then evaluates the directional DeltaTo predicate.
+            // The prefilter is part of the observable behavior because it
+            // avoids calculating DeltaTo for distant nodes.
+            const MAX_SAFE_DELTA: f64 = 500.0;
+            if point.x > other_position.x + other.rect.size.width + MAX_SAFE_DELTA
+                || point.x + node_size.width + MAX_SAFE_DELTA < other_position.x
+                || point.y > other_position.y + other.rect.size.height + MAX_SAFE_DELTA
+                || point.y + node_size.height + MAX_SAFE_DELTA < other_position.y
+            {
+                return false;
+            }
             let delta = if self.graph.container_direction_is_unset(node)
                 && self.graph.container_direction_is_unset(other.input_id)
             {
@@ -895,9 +937,23 @@ impl<'a> SizedOptimizer<'a> {
                         .and_then(|n| n.position),
                 );
             }
-            if self.overlaps_except(node, candidate_position, &[candidate])
-                || self.overlaps_except(candidate, node_position, &[node])
+            let pre_node_overlaps = self.overlaps_except(node, candidate_position, &[candidate]);
+            let pre_candidate_overlaps = self.overlaps_except(candidate, node_position, &[node]);
+            if trace_swap
+                && self.graph.nodes[node.0 as usize].tala_id == 6_334_824_724_549_167_320
+                && self.graph.nodes[candidate.0 as usize].tala_id == 2_039_569_393
             {
+                eprintln!(
+                    "SWAP_PRE_OVERLAP_RUST node={} candidate={} first={} second={} current={},{}",
+                    self.graph.nodes[node.0 as usize].tala_id,
+                    self.graph.nodes[candidate.0 as usize].tala_id,
+                    pre_node_overlaps,
+                    pre_candidate_overlaps,
+                    node_position.x,
+                    node_position.y
+                );
+            }
+            if pre_node_overlaps || pre_candidate_overlaps {
                 continue;
             }
             let candidate_score = self.score(candidate);
@@ -917,8 +973,41 @@ impl<'a> SizedOptimizer<'a> {
                 .move_active_node_abs_with_children(node, candidate_position);
             self.graph
                 .move_active_node_abs_with_children(candidate, node_position);
+            if trace_swap && crate::engine::trace_env_enabled("WEFTAN_TRACE_SWAP_MEMBERS") {
+                let members = self
+                    .graph
+                    .transaction_external_aggregate_children
+                    .get(&self.graph.nodes[node.0 as usize].tala_id)
+                    .map(|children| {
+                        children
+                            .iter()
+                            .map(|child| format!(" {}={:?}", child.tala_id, child.position))
+                            .collect::<String>()
+                    })
+                    .unwrap_or_default();
+                eprintln!(
+                    "SWAP_MEMBER_POS_RUST node={} candidate={} nodePos={:?} candidatePos={:?} members={}",
+                    self.graph.nodes[node.0 as usize].tala_id,
+                    self.graph.nodes[candidate.0 as usize].tala_id,
+                    self.graph.position(node),
+                    self.graph.position(candidate),
+                    members
+                );
+            }
             let node_overlaps = self.overlaps_except(node, candidate_position, &[]);
             let candidate_overlaps = self.overlaps_except(candidate, node_position, &[]);
+            if trace_swap
+                && self.graph.nodes[node.0 as usize].tala_id == 6_334_824_724_549_167_320
+                && self.graph.nodes[candidate.0 as usize].tala_id == 2_039_569_393
+            {
+                eprintln!(
+                    "SWAP_OVERLAP_RUST node={} candidate={} first={} second={}",
+                    self.graph.nodes[node.0 as usize].tala_id,
+                    self.graph.nodes[candidate.0 as usize].tala_id,
+                    node_overlaps,
+                    candidate_overlaps
+                );
+            }
             if node_overlaps || candidate_overlaps {
                 self.graph
                     .move_active_node_abs_with_children(node, node_position);
@@ -1044,7 +1133,10 @@ impl<'a> SizedOptimizer<'a> {
     fn optimize_limit(&mut self, temperature: f64, limit: usize) -> bool {
         let mut nodes = self.nodes.clone();
         self.rng.shuffle(&mut nodes);
-        if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_ORDER") {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_ORDER")
+            && (!crate::engine::trace_env_enabled("WEFTAN_TRACE_ROOT_ONLY")
+                || self.graph.nodes.len() == 15)
+        {
             eprint!("SIZED_ORDER_RUST");
             for node in &nodes {
                 eprint!(" {}", self.graph.nodes[node.0 as usize].tala_id);
@@ -1053,7 +1145,36 @@ impl<'a> SizedOptimizer<'a> {
         }
         let mut changed = false;
         let mut processed = 0;
-        for node in nodes {
+        for (pass, node) in nodes.into_iter().enumerate() {
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_RANKING_MODEL")
+                && self.graph.nodes.len() == 15
+            {
+                if let Some(candidate) = self
+                    .graph
+                    .nodes
+                    .iter()
+                    .find(|candidate| candidate.tala_id == 363508928)
+                    && let Some(position) = candidate.position
+                {
+                    eprintln!(
+                        "RANK_BEFORE_RUST node={} pos={},{}",
+                        self.graph.nodes[node.0 as usize].tala_id, position.x, position.y
+                    );
+                }
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_MEMBER_STATE") {
+                    eprint!(
+                        "MEMBER_STATE_RUST after={} ",
+                        self.graph.nodes[node.0 as usize].tala_id
+                    );
+                    for (vessel, members) in &self.graph.transaction_external_aggregate_children {
+                        eprint!(" cluster={} ", vessel);
+                        for member in members {
+                            eprint!("{}={:?} ", member.tala_id, member.position);
+                        }
+                    }
+                    eprintln!();
+                }
+            }
             let arena_node = &self.graph.nodes[node.0 as usize];
             if arena_node.fixed_top_left.is_some()
                 || arena_node.rect.size.width > self.cell_size * 100.0
@@ -1099,7 +1220,8 @@ impl<'a> SizedOptimizer<'a> {
             let trace_search = crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_PASS_ACTIVE")
                 && trace_search_target.as_deref() == Some("all")
                 || trace_search_target.as_deref().is_some_and(|targets| {
-                    crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_PASS_ACTIVE")
+                    (crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_PASS_ACTIVE")
+                        || crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_SEARCH_ALWAYS"))
                         && targets.split(',').any(|target| {
                             target.parse::<u64>().ok()
                                 == Some(self.graph.nodes[node.0 as usize].tala_id)
@@ -1189,6 +1311,22 @@ impl<'a> SizedOptimizer<'a> {
                 eprintln!();
             }
             self.rng.shuffle(&mut points);
+            if crate::engine::trace_env_value("WEFTAN_TRACE_SIZED_MOVE_NODE").is_some_and(
+                |target| {
+                    target == "all"
+                        || target.split(',').any(|target| {
+                            target.parse::<u64>().ok()
+                                == Some(self.graph.nodes[node.0 as usize].tala_id)
+                        })
+                },
+            ) && (!crate::engine::trace_env_enabled("WEFTAN_TRACE_ROOT_ONLY")
+                || self.graph.nodes.len() == 15)
+            {
+                eprintln!(
+                    "SIZED_PASS_RUST pass={} node={}",
+                    pass, self.graph.nodes[node.0 as usize].tala_id
+                );
+            }
             if crate::engine::trace_env_enabled("WEFTAN_TRACE_HUB_RETRY") {
                 eprint!(
                     "HUB_RETRY_RUST node={} len={}",
@@ -1222,7 +1360,9 @@ impl<'a> SizedOptimizer<'a> {
             let moved = self.move_to_best(node, &points, temperature == 0.0);
             if (crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_SELECTED")
                 && self.graph.nodes[node.0 as usize].tala_id == 727256374)
-                || crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_SELECTED_ALL")
+                || (crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_SELECTED_ALL")
+                    && (!crate::engine::trace_env_enabled("WEFTAN_TRACE_ROOT_ONLY")
+                        || self.graph.nodes.len() == 15))
             {
                 let selected = self.graph.position(node).unwrap();
                 eprintln!(
@@ -1235,13 +1375,38 @@ impl<'a> SizedOptimizer<'a> {
                 changed = true;
             } else {
                 let candidate = self.best_swap_candidate(node);
-                if trace_search {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_MOVE_ALWAYS")
+                    && crate::engine::trace_env_value("WEFTAN_TRACE_SIZED_MOVE_NODE").is_some_and(
+                        |target| {
+                            target == "all"
+                                || target.split(',').any(|target| {
+                                    target.parse::<u64>().ok()
+                                        == Some(self.graph.nodes[node.0 as usize].tala_id)
+                                })
+                        },
+                    )
+                {
                     eprintln!(
-                        "SIZED_FALLBACK_RUST node={} swap={}",
+                        "SIZED_FALLBACK_RUST pass={} node={} swap={} current={},{}",
+                        pass,
                         self.graph.nodes[node.0 as usize].tala_id,
                         candidate
                             .map(|candidate| self.graph.nodes[candidate.0 as usize].tala_id)
-                            .unwrap_or_default()
+                            .unwrap_or_default(),
+                        self.graph.position(node).unwrap().x,
+                        self.graph.position(node).unwrap().y,
+                    );
+                }
+                if trace_search {
+                    eprintln!(
+                        "SIZED_FALLBACK_RUST pass={} node={} swap={} current={},{}",
+                        pass,
+                        self.graph.nodes[node.0 as usize].tala_id,
+                        candidate
+                            .map(|candidate| self.graph.nodes[candidate.0 as usize].tala_id)
+                            .unwrap_or_default(),
+                        self.graph.position(node).unwrap().x,
+                        self.graph.position(node).unwrap().y,
                     );
                 }
                 if let Some(candidate) = candidate {
@@ -1324,6 +1489,30 @@ impl<'a> SizedOptimizer<'a> {
                         .iter()
                         .find(|candidate| candidate.tala_id == 87_416_211)
                         .and_then(|candidate| candidate.position)
+                );
+            }
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_RANKING_MODEL")
+                && self.graph.nodes.len() == 15
+                && let Some(candidate) = self
+                    .graph
+                    .nodes
+                    .iter()
+                    .find(|candidate| candidate.tala_id == 363508928)
+                && let Some(position) = candidate.position
+            {
+                eprintln!(
+                    "RANK_AFTER_RUST node={} pos={},{}",
+                    self.graph.nodes[node.0 as usize].tala_id, position.x, position.y
+                );
+            }
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_SIZED_FINAL")
+                && (!crate::engine::trace_env_enabled("WEFTAN_TRACE_ROOT_ONLY")
+                    || self.graph.nodes.len() == 15)
+            {
+                let selected = self.graph.position(node).unwrap();
+                eprintln!(
+                    "SIZED_FINAL_RUST node={} moved={} current={},{}",
+                    self.graph.nodes[node.0 as usize].tala_id, moved, selected.x, selected.y
                 );
             }
         }

@@ -735,6 +735,26 @@ impl ArenaGraph {
     /// entries must remain in the worklist to preserve the shared RNG stream.
     pub(super) fn sized_optimizer_nodes(&self) -> Vec<NodeId> {
         let declaration_order = self.node_order.clone();
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_NODE_ORDER") {
+            eprintln!(
+                "NODE_ORDER_RUST placement_owned={} node_order={:?} containers={:?}",
+                self.placement_scope_owned,
+                declaration_order
+                    .iter()
+                    .map(|node| self.nodes[node.0 as usize].tala_id)
+                    .collect::<Vec<_>>(),
+                self.containers
+                    .iter()
+                    .map(|(scope, children)| (
+                        scope.map(|node| self.nodes[node.0 as usize].tala_id),
+                        children
+                            .iter()
+                            .map(|node| self.nodes[node.0 as usize].tala_id)
+                            .collect::<Vec<_>>(),
+                    ))
+                    .collect::<Vec<_>>(),
+            );
+        }
         self.placement_fifo_order(declaration_order)
     }
 

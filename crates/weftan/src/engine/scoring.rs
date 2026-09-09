@@ -1113,6 +1113,13 @@ impl ArenaGraph {
         other_endpoint: NodeId,
         restore_sequence_endpoints: bool,
     ) -> Option<ProjectedAdjacent> {
+        // With a nil EdgeAbductions slice, OSS TALA reconstructs cluster
+        // replacements but leaves sequence-vessel endpoints as the current
+        // vessel. Sequence abductions are only restored by AlignAxes, which
+        // explicitly supplies that slice.
+        if !restore_sequence_endpoints && self.active_sequence_index(endpoint).is_some() {
+            return None;
+        }
         if restore_sequence_endpoints && self.active_cluster_index(endpoint).is_some() {
             return self
                 .active_aggregate_endpoint_projection_with_sequence_abductions(endpoint, true);
@@ -1364,23 +1371,28 @@ impl ArenaGraph {
         position: Point,
         size: Size,
     ) -> bool {
-        let left = position.x;
-        let right = left + size.width;
-        let top = position.y;
-        let bottom = top + size.height;
+        let mut left = position.x;
+        let mut right = position.x + size.width;
+        if left > right {
+            std::mem::swap(&mut left, &mut right);
+        }
+        let mut top = position.y;
+        let mut bottom = position.y + size.height;
+        if top > bottom {
+            std::mem::swap(&mut top, &mut bottom);
+        }
 
-        if if start.x < end.x {
-            end.x < left || right < start.x
-        } else {
-            start.x < left || right < end.x
-        } {
+        // Match the v0.9.0 Go helper's explicit NaN guard.  Ordered
+        // comparisons alone would otherwise let a NaN boundary through.
+        if left.is_nan() || right.is_nan() || top.is_nan() || bottom.is_nan() {
             return false;
         }
-        if if start.y < end.y {
-            end.y < top || bottom < start.y
-        } else {
-            start.y < top || bottom < end.y
-        } {
+
+        if (start.x < left && end.x < left)
+            || (start.x > right && end.x > right)
+            || (start.y < top && end.y < top)
+            || (start.y > bottom && end.y > bottom)
+        {
             return false;
         }
 
@@ -1391,76 +1403,28 @@ impl ArenaGraph {
             return true;
         }
 
-        let orientation =
-            |p: Point, q: Point, r: Point| (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
-        let on_segment = |point: Point, a: Point, b: Point| {
-            a.x.min(b.x) <= point.x
-                && point.x <= a.x.max(b.x)
-                && a.y.min(b.y) <= point.y
-                && point.y <= a.y.max(b.y)
-        };
-        let equal_signs =
-            |a: f64, b: f64| (a > 0.0 && b > 0.0) || (a == 0.0 && b == 0.0) || (a < 0.0 && b < 0.0);
-        let intersects = |p1: Point, q1: Point, p2: Point, q2: Point| {
-            let o1 = orientation(p1, q1, p2);
-            if o1 == 0.0 && on_segment(p2, p1, q1) {
-                return true;
+        let mut t_enter: f64 = 0.0;
+        let mut t_exit: f64 = 1.0;
+        let mut clip_axis = |axis_start: f64, delta: f64, min_coord: f64, max_coord: f64| -> bool {
+            if delta == 0.0 {
+                return min_coord <= axis_start && axis_start <= max_coord;
             }
-            let o2 = orientation(p1, q1, q2);
-            if o2 == 0.0 && on_segment(q2, p1, q1) {
-                return true;
+            let mut t1 = (min_coord - axis_start) / delta;
+            let mut t2 = (max_coord - axis_start) / delta;
+            if t1 > t2 {
+                std::mem::swap(&mut t1, &mut t2);
             }
-            let o3 = orientation(p2, q2, p1);
-            if o3 == 0.0 && on_segment(p1, p2, q2) {
-                return true;
-            }
-            let o4 = orientation(p2, q2, q1);
-            if o4 == 0.0 && on_segment(q1, p2, q2) {
-                return true;
-            }
-            !equal_signs(o1, o2) && !equal_signs(o3, o4)
+            t_enter = t_enter.max(t1);
+            t_exit = t_exit.min(t2);
+            t_enter <= t_exit
         };
 
-        let top_left = Point { x: left, y: top };
-        let top_right = Point { x: right, y: top };
-        let bottom_right = Point {
-            x: right,
-            y: bottom,
-        };
-        let bottom_left = Point { x: left, y: bottom };
-        intersects(
-            start,
-            Point {
-                x: end.x,
-                y: end.y - 1.0,
-            },
-            top_left,
-            top_right,
-        ) || intersects(
-            start,
-            Point {
-                x: end.x - 1.0,
-                y: end.y,
-            },
-            top_left,
-            bottom_left,
-        ) || intersects(
-            start,
-            Point {
-                x: end.x + 1.0,
-                y: end.y,
-            },
-            top_right,
-            bottom_right,
-        ) || intersects(
-            start,
-            Point {
-                x: end.x,
-                y: end.y + 1.0,
-            },
-            bottom_left,
-            bottom_right,
-        )
+        if !clip_axis(start.x, end.x - start.x, left, right)
+            || !clip_axis(start.y, end.y - start.y, top, bottom)
+        {
+            return false;
+        }
+        t_enter < t_exit
     }
 
     pub(super) fn edge_route_penalty(

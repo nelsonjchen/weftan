@@ -17,10 +17,15 @@ build_root="$(mktemp -d "${TMPDIR:-/tmp}/weftan-d2-oracle.XXXXXX")"
 cleanup() { rm -rf "$build_root"; }
 trap cleanup EXIT
 
+toolchain="${GOTOOLCHAIN:-go1.27.0}"
+echo "building D2 v0.9.0 TALA oracle with ${toolchain}" >&2
+
 cp "$script_root/oss-tala-oracle/main.go" "$script_root/oss-tala-oracle/go.mod" \
   "$script_root/oss-tala-oracle/go.sum" "$build_root/"
 go mod edit -C "$build_root" -dropreplace=github.com/d2lang/d2 \
   -replace="github.com/d2lang/d2=$source_root"
 mkdir -p "$(dirname "$output_path")"
-(cd "$build_root" && go build -o "$output_path" .)
+# D2 v0.9.0's released TALA was built and inspected with Go 1.27.0. Keep
+# oracle rebuilds on that toolchain unless a caller deliberately overrides it.
+(cd "$build_root" && GOTOOLCHAIN="$toolchain" go build -o "$output_path" .)
 echo "$output_path"

@@ -398,6 +398,18 @@ impl HierarchyPlacement {
         // `createPlacementNodes` shuffles every returned sibling slice, not
         // only the top-level roots. Singleton slices consume no random value.
         rng.shuffle(&mut placements);
+        if std::env::var_os("WEFTAN_TRACE_HIER_ORDER").is_some() && placements.len() > 1 {
+            eprintln!(
+                "HIER_SHUFFLE_RUST len={} ids={:?}",
+                placements.len(),
+                placements
+                    .iter()
+                    .map(|index| self.nodes[*index]
+                        .graph_node
+                        .map(|node| graph.nodes[node.0 as usize].tala_id))
+                    .collect::<Vec<_>>()
+            );
+        }
         placements
     }
 
@@ -1398,10 +1410,22 @@ impl HierarchyPlacement {
             orders.push(self.order_state(HierarchyOrderStage::Initial));
         }
         self.minimize_crossings();
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_HIER_ORDER") {
+            eprintln!(
+                "HIER_ORDER_RUST after_min {:?}",
+                self.order_state(HierarchyOrderStage::AfterMinimize)
+            );
+        }
         if let Some(orders) = orders.as_deref_mut() {
             orders.push(self.order_state(HierarchyOrderStage::AfterMinimize));
         }
         self.global_sifting();
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_HIER_ORDER") {
+            eprintln!(
+                "HIER_ORDER_RUST after_sift {:?}",
+                self.order_state(HierarchyOrderStage::AfterGlobalSifting)
+            );
+        }
         if let Some(orders) = orders {
             orders.push(self.order_state(HierarchyOrderStage::AfterGlobalSifting));
         }

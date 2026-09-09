@@ -32,10 +32,13 @@ uv run --no-project python scripts/compare-tala-traces.py \
   target/oss-tala-oracle-v0.9.0 target/debug/d2plugin-weftan --seed 1
 ```
 
-The simple, label-position, icon-position, all-shapes, and flipt fixtures
-currently produce identical normalized traces. Cluster-vessel projection in
-the diagnostic adapter makes the stable arena representation comparable with
-D2's temporary aggregate nodes without changing the release protocol.
+The simple, label-position, all-shapes, flipt, bipartite, and Twitter witnesses
+currently produce identical normalized traces and public JSON. The
+icon-position fixture remains an earliest-divergence witness: nested child
+placement differs before label selection, so the label mismatch is not hidden
+by a final-output-only comparison. Cluster-vessel projection in the diagnostic
+adapter makes the stable arena representation comparable with D2's temporary
+aggregate nodes without changing the release protocol.
 
 A broad diagnostic run with seed `1`, `DEV_MODE=1`, eight workers, and a
 60-second per-case limit produced 108 exact cases out of 116 successful cases

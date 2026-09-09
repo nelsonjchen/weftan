@@ -183,6 +183,20 @@ fn movement_bounds(
             continue;
         }
         let locked_coordinate = segment_coordinate(locked_segment, vertical);
+        if std::env::var_os("WEFTAN_TRACE_BALANCE_DETAIL").is_some()
+            && vertical
+            && ((coordinate - 1024.0).abs() < 0.1
+                || (coordinate - 1064.0).abs() < 0.1
+                || (coordinate - 1074.0).abs() < 0.1)
+        {
+            eprintln!(
+                "BALANCE_RUST_LOCK moving={:?} locked={:?} coord={} overlap={}",
+                current,
+                locked_segment,
+                locked_coordinate,
+                intersects_movement_band(current, locked_segment, vertical, 40.0)
+            );
+        }
         // D2's Segment.GetBounds treats a coincident obstacle as the floor.
         // That detail is significant for routes launched along node borders.
         if locked_coordinate <= coordinate {
@@ -230,6 +244,107 @@ fn set_segment_coordinate(
         graph.edges[segment.edge].points[segment.first].y = value;
         graph.edges[segment.edge].points[segment.second].y = value;
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BalanceOrder {
+    Preserved,
+    Reversed,
+    ContactChanged,
+}
+
+fn segment_axis_interval(segment: (Point, Point), vertical: bool) -> (f64, f64) {
+    if vertical {
+        (segment.0.y.min(segment.1.y), segment.0.y.max(segment.1.y))
+    } else {
+        (segment.0.x.min(segment.1.x), segment.0.x.max(segment.1.x))
+    }
+}
+
+fn segment_coordinate_for_balance(segment: (Point, Point), vertical: bool) -> f64 {
+    if vertical { segment.0.x } else { segment.0.y }
+}
+
+/// Match TALA's route-order guard. A segment in the narrowest movement range
+/// must not cross a route from another range, or create a new collinear contact.
+fn check_balance_order(
+    graph: &ArenaGraph,
+    batch: &[usize],
+    batch_set: &BTreeSet<usize>,
+    segments: &[BalanceSegment],
+    special_segments: &[(Point, Point)],
+    proposed: &[f64],
+    vertical: bool,
+) -> BalanceOrder {
+    let moving = batch.iter().enumerate().any(|(index, segment_index)| {
+        let old = segment_coordinate_for_balance(
+            canonical_segment(graph, segments[*segment_index], vertical),
+            vertical,
+        );
+        proposed[index] != old
+    });
+    if !moving {
+        return BalanceOrder::Preserved;
+    }
+
+    let mut order = BalanceOrder::Preserved;
+    for other_index in 0..segments.len() {
+        if batch_set.contains(&other_index) {
+            continue;
+        }
+        let other = canonical_segment(graph, segments[other_index], vertical);
+        let other_interval = segment_axis_interval(other, vertical);
+        for (batch_position, segment_index) in batch.iter().enumerate() {
+            let segment = canonical_segment(graph, segments[*segment_index], vertical);
+            if segments[*segment_index].edge == segments[other_index].edge {
+                continue;
+            }
+            let old = segment_coordinate_for_balance(segment, vertical);
+            if proposed[batch_position] == old {
+                continue;
+            }
+            let interval = segment_axis_interval(segment, vertical);
+            if interval.1 < other_interval.0 || other_interval.1 < interval.0 {
+                continue;
+            }
+            let position = segment_coordinate_for_balance(other, vertical);
+            if old == position || proposed[batch_position] == position {
+                return BalanceOrder::ContactChanged;
+            }
+            if (old < position) != (proposed[batch_position] < position) {
+                order = BalanceOrder::Reversed;
+                if std::env::var_os("WEFTAN_TRACE_BALANCE_DETAIL").is_some() {
+                    eprintln!(
+                        "BALANCE_RUST_REVERSE batch={} other={} old={} proposed={} position={} vertical={vertical}",
+                        segment_index, other_index, old, proposed[batch_position], position
+                    );
+                }
+            }
+        }
+    }
+
+    for other in special_segments {
+        let other_interval = segment_axis_interval(*other, vertical);
+        for (batch_position, segment_index) in batch.iter().enumerate() {
+            let segment = canonical_segment(graph, segments[*segment_index], vertical);
+            let old = segment_coordinate_for_balance(segment, vertical);
+            if proposed[batch_position] == old {
+                continue;
+            }
+            let interval = segment_axis_interval(segment, vertical);
+            if interval.1 < other_interval.0 || other_interval.1 < interval.0 {
+                continue;
+            }
+            let position = segment_coordinate_for_balance(*other, vertical);
+            if old == position || proposed[batch_position] == position {
+                return BalanceOrder::ContactChanged;
+            }
+            if (old < position) != (proposed[batch_position] < position) {
+                order = BalanceOrder::Reversed;
+            }
+        }
+    }
+    order
 }
 
 fn shared_balancing_cluster(
@@ -360,7 +475,7 @@ pub(in crate::engine) fn balance_regular_edges(
                 special_segments.push(current);
             }
         }
-        locked.extend(special_segments);
+        locked.extend(special_segments.clone());
 
         while ignored.iter().any(|ignored| !ignored) {
             let ranges: Vec<_> = segments
@@ -452,16 +567,53 @@ pub(in crate::engine) fn balance_regular_edges(
                     })
                     .collect();
                 let values = evenly_distribute(min_range.0, min_range.1, distinct.len());
+                if std::env::var_os("WEFTAN_TRACE_BALANCE_DETAIL").is_some() {
+                    eprintln!(
+                        "BALANCE_RUST_BATCH vertical={vertical} range={:?} batch={:?} values={:?} coords={:?}",
+                        min_range,
+                        batch
+                            .iter()
+                            .map(|index| {
+                                let edge = &graph.edges[segments[*index].edge];
+                                (
+                                    graph.nodes[edge.from.0 as usize].tala_id,
+                                    graph.nodes[edge.to.0 as usize].tala_id,
+                                    segments[*index].first,
+                                    segments[*index].second,
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                        values,
+                        batch
+                            .iter()
+                            .map(|index| segment_coordinate(
+                                canonical_segment(graph, segments[*index], vertical),
+                                vertical
+                            ))
+                            .collect::<Vec<_>>()
+                    );
+                }
+                let batch_set: BTreeSet<_> = batch.iter().copied().collect();
+                let original: Vec<_> = batch
+                    .iter()
+                    .map(|index| {
+                        segment_coordinate_for_balance(
+                            canonical_segment(graph, segments[*index], vertical),
+                            vertical,
+                        )
+                    })
+                    .collect();
+                let mut proposed = original.clone();
                 let mut value_index = 0;
                 let mut segment_index = 0;
                 while value_index < values.len() && segment_index < batch.len() {
-                    let coordinate = segment_coordinate(
+                    let coordinate = segment_coordinate_for_balance(
                         canonical_segment(graph, segments[batch[segment_index]], vertical),
                         vertical,
                     );
                     let mut shared_count = 1;
                     while segment_index + shared_count < batch.len() {
-                        let other_coordinate = segment_coordinate(
+                        let other_coordinate = segment_coordinate_for_balance(
                             canonical_segment(
                                 graph,
                                 segments[batch[segment_index + shared_count]],
@@ -475,16 +627,45 @@ pub(in crate::engine) fn balance_regular_edges(
                             break;
                         }
                     }
-                    for index in &batch[segment_index..segment_index + shared_count] {
-                        set_segment_coordinate(
-                            graph,
-                            segments[*index],
-                            vertical,
-                            values[value_index],
-                        );
+                    for value in proposed.iter_mut().skip(segment_index).take(shared_count) {
+                        *value = values[value_index];
                     }
                     segment_index += shared_count;
                     value_index += 1;
+                }
+                let order = check_balance_order(
+                    graph,
+                    &batch,
+                    &batch_set,
+                    &segments,
+                    &special_segments,
+                    &proposed,
+                    vertical,
+                );
+                // TALA's reversal fallback admits a batch when the proposed
+                // move uncrosses the neighboring channel. The common
+                // one-segment case is equivalent to moving toward the lower
+                // coordinate; upward/rightward reversals require the full Go
+                // crossing scorer and remain rejected conservatively.
+                let reversal_uncrosses = order == BalanceOrder::Reversed
+                    && batch.len() == 1
+                    && proposed[0] < original[0];
+                let accept = order == BalanceOrder::Preserved || reversal_uncrosses;
+                if std::env::var_os("WEFTAN_TRACE_BALANCE_DETAIL").is_some() {
+                    eprintln!(
+                        "BALANCE_RUST_ORDER vertical={vertical} range={:?} order={order:?} proposed={proposed:?}",
+                        min_range
+                    );
+                }
+                if accept {
+                    for (index, segment_index) in batch.iter().enumerate() {
+                        set_segment_coordinate(
+                            graph,
+                            segments[*segment_index],
+                            vertical,
+                            proposed[index],
+                        );
+                    }
                 }
                 for index in batch {
                     ignored[index] = true;

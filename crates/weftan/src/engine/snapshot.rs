@@ -288,6 +288,9 @@ pub fn layout_snapshot(input: &Graph, seed: i64, stage: LayoutStage) -> LayoutSn
             );
         }
         let recursively_placed = projected_scope_placement && pipeline.place_nodes_recursively();
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_HIER_ORDER") {
+            eprintln!("RECURSIVELY_PLACED_RUST {}", recursively_placed);
+        }
         if matches!(
             stage,
             LayoutStage::NodePlacement
@@ -622,27 +625,62 @@ pub fn layout_snapshot(input: &Graph, seed: i64, stage: LayoutStage) -> LayoutSn
     if requested_stage == LayoutStage::Normalize {
         pipeline.run_normalize();
         pipeline.trace_node_stage("Normalize");
-        if std::env::var_os("WEFTAN_DISABLE_COMPOUND_FLOW").is_none()
-            && pipeline.graph.apply_compound_flow()
-        {
-            crate::engine::set_trace_suppressed(true);
-            pipeline.run_edge_routing();
-            pipeline.run_simplify_edge_routes();
-            pipeline.run_swap_edge_ports();
-            pipeline.run_straight_edges_fallback();
-            pipeline.run_balance_edge_segments();
-            pipeline.run_fix_cluster_edge_branching();
-            pipeline.run_trace_edges_to_shape_border();
-            pipeline.run_reorder_duplicates();
-            // CompoundCandidate is evaluated after the complete local seed
-            // pipeline in released D2. Keep its candidate-local reroute out
-            // of the ordinary stage trace; the resulting graph is still the
-            // snapshot used for the public layout result.
-            pipeline.run_normalize();
+        let compound_applied = {
+            let ordinary = pipeline.graph.clone();
+            let ordinary_snapshot = pipeline.snapshot(LayoutStage::Normalize);
+            let ordinary_score = race_snapshot_score(&ordinary_snapshot);
+            if !pipeline.graph.apply_compound_flow() {
+                false
+            } else {
+                crate::engine::set_trace_suppressed(true);
+                pipeline.run_edge_routing();
+                pipeline.run_simplify_edge_routes();
+                pipeline.run_swap_edge_ports();
+                pipeline.run_straight_edges_fallback();
+                pipeline.run_balance_edge_segments();
+                pipeline.run_fix_cluster_edge_branching();
+                pipeline.run_trace_edges_to_shape_border();
+                pipeline.run_reorder_duplicates();
+                pipeline.run_place_labels();
+                crate::engine::set_trace_suppressed(false);
+                let candidate_snapshot = pipeline.snapshot(LayoutStage::Normalize);
+                let candidate_score = race_snapshot_score(&candidate_snapshot);
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_COMPOUND_SCORE") {
+                    eprintln!(
+                        "COMPOUND_SCORE_RUST ordinary={ordinary_score:?} candidate={candidate_score:?}"
+                    );
+                }
+                if candidate_score.total() < ordinary_score.total()
+                    || (candidate_score.total() == ordinary_score.total()
+                        && candidate_score.area_term < ordinary_score.area_term)
+                {
+                    true
+                } else {
+                    pipeline.graph = ordinary;
+                    false
+                }
+            }
+        };
+        if compound_applied {
             crate::engine::set_trace_suppressed(false);
         }
     }
     pipeline.snapshot(requested_stage)
+}
+
+fn race_snapshot_score(snapshot: &LayoutSnapshot) -> evaluation::RaceScoreBreakdown {
+    let routes = snapshot
+        .edges
+        .iter()
+        .map(|edge| (edge.edge, edge.points.clone()))
+        .collect::<BTreeMap<_, _>>();
+    evaluation::evaluate_race_seed_layout(
+        &routes,
+        &snapshot.race_seed_clustered_edges,
+        snapshot.race_seed_label_score,
+        snapshot.race_seed_area_term,
+        &snapshot.race_seed_edge_order,
+    )
 }
 
 /// Runs the recovered pipeline as an ordinary layout result.

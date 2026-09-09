@@ -1806,6 +1806,24 @@ impl ArenaGraph {
     /// retained member children. Keeping the single-vessel boundary explicit
     /// lets the flattened projection preserve the same node-loop order.
     pub(super) fn sync_external_cluster(&mut self, vessel_tala_id: u64) {
+        let trace_object2 = crate::engine::trace_env_enabled("WEFTAN_TRACE_OBJECT2");
+        if trace_object2 {
+            let positions = self
+                .transaction_external_aggregate_children
+                .get(&6334824724549167320)
+                .map(|children| {
+                    children
+                        .iter()
+                        .map(|child| (child.tala_id, child.position))
+                        .collect::<Vec<_>>()
+                });
+            eprintln!(
+                "OBJECT2_SYNC_CLUSTER_BEGIN caller={} vessel={} {:?}",
+                std::panic::Location::caller(),
+                vessel_tala_id,
+                positions
+            );
+        }
         let Some(layout) = self
             .transaction_external_cluster_layouts
             .get(&vessel_tala_id)
@@ -1924,6 +1942,21 @@ impl ArenaGraph {
             }
         }
         self.reconcile_projected_offsets_from_external_cluster(vessel_tala_id);
+        if trace_object2 {
+            let positions = self
+                .transaction_external_aggregate_children
+                .get(&6334824724549167320)
+                .map(|children| {
+                    children
+                        .iter()
+                        .map(|child| (child.tala_id, child.position))
+                        .collect::<Vec<_>>()
+                });
+            eprintln!(
+                "OBJECT2_SYNC_CLUSTER_AFTER vessel={} {:?}",
+                vessel_tala_id, positions
+            );
+        }
     }
 }
 

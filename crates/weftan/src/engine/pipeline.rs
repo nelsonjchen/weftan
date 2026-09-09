@@ -256,24 +256,31 @@ impl Pipeline {
             .iter()
             .filter_map(|node_id| self.trace_node(*node_id))
             .collect();
+        // TALA's trace walks Graph.Edges, which contains only the currently
+        // active edge slice after tree preprocessing. The stable arena keeps
+        // extracted tree edges for later routing, so use edge_order here to
+        // avoid exposing inactive retained edges in the diagnostic protocol.
         let edges = self
             .graph
-            .edges
+            .edge_order
             .iter()
             .enumerate()
-            .map(|(index, edge)| NormalizedTraceEdge {
-                id: edge.input_id.0.to_string(),
-                index,
-                from: self.trace_node_id(edge.from),
-                to: self.trace_node_id(edge.to),
-                route: edge
-                    .points
-                    .iter()
-                    .map(|point| NormalizedTracePoint {
-                        x_bits: trace_float_bits(point.x),
-                        y_bits: trace_float_bits(point.y),
-                    })
-                    .collect(),
+            .map(|(index, edge_id)| {
+                let edge = &self.graph.edges[edge_id.0 as usize];
+                NormalizedTraceEdge {
+                    id: edge.input_id.0.to_string(),
+                    index,
+                    from: self.trace_node_id(edge.from),
+                    to: self.trace_node_id(edge.to),
+                    route: edge
+                        .points
+                        .iter()
+                        .map(|point| NormalizedTracePoint {
+                            x_bits: trace_float_bits(point.x),
+                            y_bits: trace_float_bits(point.y),
+                        })
+                        .collect(),
+                }
             })
             .collect();
         let event = NormalizedTraceEvent {

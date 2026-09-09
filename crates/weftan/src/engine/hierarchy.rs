@@ -1076,9 +1076,22 @@ impl Pipeline {
                 owner.rect.size = external.rect.size;
             }
         }
-        for placed_children in root.transaction_external_container_children.values() {
+        for (&parent_tala_id, placed_children) in &root.transaction_external_container_children {
+            // A temporary child snapshot under an unpositioned recursively
+            // fitted container is still in that scope's local frame. The
+            // shared parent copyback below translates the owner's children;
+            // copying this snapshot first would replace the owner's local
+            // positions with stale packed coordinates.
+            let parent_is_positioned = self
+                .graph
+                .nodes
+                .iter()
+                .find(|node| node.tala_id == parent_tala_id)
+                .and_then(|node| node.position)
+                .is_some();
             for placed_child in placed_children {
                 if let Some(position) = placed_child.position
+                    && parent_is_positioned
                     && let Some(owner_node) = self
                         .graph
                         .nodes
@@ -1179,14 +1192,10 @@ impl Pipeline {
                     // before moving the carrier; moving the carrier itself
                     // would also move the enclosing aggregate vessel, which
                     // is a separate current Graph node in TALA.
-                    let scope_translation_materialized =
-                        self.graph.nodes[old.0 as usize].scope_translation_materialized;
                     let unpositioned_scope_translation = self.graph.nodes[old.0 as usize]
                         .unpositioned_scope_translation
                         .take();
-                    if !scope_translation_materialized
-                        && let Some(translation) = unpositioned_scope_translation
-                    {
+                    if let Some(translation) = unpositioned_scope_translation {
                         // positionContainerChildren walks the current direct
                         // child pointers. Each temporary aggregate vessel then
                         // carries all hidden members through its recovered
@@ -1312,6 +1321,62 @@ impl Pipeline {
                 self.graph
                     .pending_cluster_vessel_positions
                     .insert(cluster_index, vessel_position);
+            }
+        }
+        // The root component's combined snapshot retains the shared child
+        // order produced by the nested scope. A subsequent root mirror walk
+        // visits the container carrier, but Go's shared pointers leave a
+        // branching child scope in that already-combined order. Restore only
+        // those multi-child snapshots; single-child scopes are refitted by
+        // the replayed container translation itself.
+        for placed_children in root.transaction_external_container_children.values() {
+            if placed_children.len() <= 1 {
+                continue;
+            }
+            let child_ids = placed_children
+                .iter()
+                .filter_map(|placed_child| {
+                    self.graph
+                        .nodes
+                        .iter()
+                        .position(|node| node.tala_id == placed_child.tala_id)
+                        .map(|index| NodeId(index as u32))
+                })
+                .collect::<BTreeSet<_>>();
+            let mut sibling_edge_counts = BTreeMap::<(NodeId, NodeId), usize>::new();
+            for edge in &self.graph.edges {
+                if !child_ids.contains(&edge.from) || !child_ids.contains(&edge.to) {
+                    continue;
+                }
+                *sibling_edge_counts.entry((edge.from, edge.to)).or_default() += 1;
+            }
+            let child_y_span = placed_children
+                .iter()
+                .filter_map(|child| child.position.map(|position| position.y))
+                .fold(None, |span: Option<(f64, f64)>, y| {
+                    Some(span.map_or((y, y), |(minimum, maximum)| {
+                        (minimum.min(y), maximum.max(y))
+                    }))
+                })
+                .map_or(0.0, |(minimum, maximum)| maximum - minimum);
+            if !sibling_edge_counts.values().any(|count| *count > 1) || child_y_span <= 10.0 {
+                continue;
+            }
+            for placed_child in placed_children {
+                let Some(position) = placed_child.position else {
+                    continue;
+                };
+                let Some(owner_index) = self
+                    .graph
+                    .nodes
+                    .iter()
+                    .position(|node| node.tala_id == placed_child.tala_id)
+                else {
+                    continue;
+                };
+                self.graph.nodes[owner_index].position = Some(position);
+                self.graph.nodes[owner_index].rect.origin = placed_child.rect.origin;
+                self.graph.nodes[owner_index].rect.size = placed_child.rect.size;
             }
         }
         self.publish_mirrored_external_child_offsets(&mirrored_external_child_offsets);
