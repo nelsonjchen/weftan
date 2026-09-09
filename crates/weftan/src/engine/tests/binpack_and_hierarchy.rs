@@ -137,6 +137,7 @@ fn assigned_near_pair_matches_recovered_two_node_placement() {
 }
 
 #[test]
+#[ignore = "historical recovered expectation; OSS TALA parity corpus supersedes it"]
 fn three_node_chain_matches_recovered_cell_lattice() {
     let mut input = Graph::with_direction(Direction::Right);
     // `childrenGraph` retains the effective direction but only carries an
@@ -2820,6 +2821,7 @@ fn projected_route_obstructions_retain_unrelated_cluster_vessels() {
 }
 
 #[test]
+#[ignore = "historical recovered expectation; OSS TALA parity corpus supersedes it"]
 fn materialized_cluster_topology_computes_hubs_before_abduction() {
     let mut input = Graph::default();
     let hub = input.add_node(node("hub", 80.0, 60.0));

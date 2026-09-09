@@ -625,14 +625,26 @@ pub fn layout_snapshot(input: &Graph, seed: i64, stage: LayoutStage) -> LayoutSn
     if requested_stage == LayoutStage::Normalize {
         pipeline.run_normalize();
         pipeline.trace_node_stage("Normalize");
-        let compound_applied = {
+        let _compound_applied = {
             let ordinary = pipeline.graph.clone();
             let ordinary_snapshot = pipeline.snapshot(LayoutStage::Normalize);
             let ordinary_score = race_snapshot_score(&ordinary_snapshot);
             if !pipeline.graph.apply_compound_flow() {
                 false
             } else {
-                crate::engine::set_trace_suppressed(true);
+                let trace_json_was_enabled = crate::engine::trace_env_enabled("WEFTAN_TRACE_JSONL");
+                if trace_json_was_enabled {
+                    // The Go CompoundCandidate is a scoring transaction. Its
+                    // exploratory stages do not appear in the published
+                    // execution trace; only the selected ordinary pipeline
+                    // remains observable.
+                    crate::engine::set_trace_suppressed(true);
+                }
+                // CompoundCandidate starts a fresh routing transaction after
+                // moving the rigid blocks. The released Go pipeline clears
+                // every automatic route before rerouting, so stale ordinary
+                // points must not influence OVG ports or fallback costs.
+                reset_compound_route_state(&mut pipeline.graph);
                 pipeline.run_edge_routing();
                 pipeline.run_simplify_edge_routes();
                 pipeline.run_swap_edge_ports();
@@ -642,30 +654,50 @@ pub fn layout_snapshot(input: &Graph, seed: i64, stage: LayoutStage) -> LayoutSn
                 pipeline.run_trace_edges_to_shape_border();
                 pipeline.run_reorder_duplicates();
                 pipeline.run_place_labels();
-                crate::engine::set_trace_suppressed(false);
+                // CompoundCandidate's reroutePlaced finishes with the same
+                // placement.Normalize used by the ordinary pipeline.  Its
+                // routes are therefore translated with their boxes before
+                // the candidate is scored and committed.
+                pipeline.run_normalize();
                 let candidate_snapshot = pipeline.snapshot(LayoutStage::Normalize);
                 let candidate_score = race_snapshot_score(&candidate_snapshot);
-                if crate::engine::trace_env_enabled("WEFTAN_TRACE_COMPOUND_SCORE") {
-                    eprintln!(
-                        "COMPOUND_SCORE_RUST ordinary={ordinary_score:?} candidate={candidate_score:?}"
-                    );
-                }
                 if candidate_score.total() < ordinary_score.total()
                     || (candidate_score.total() == ordinary_score.total()
                         && candidate_score.area_term < ordinary_score.area_term)
                 {
+                    if trace_json_was_enabled {
+                        crate::engine::set_trace_suppressed(false);
+                    }
                     true
                 } else {
                     pipeline.graph = ordinary;
+                    if trace_json_was_enabled {
+                        crate::engine::set_trace_suppressed(false);
+                    }
                     false
                 }
             }
         };
-        if compound_applied {
-            crate::engine::set_trace_suppressed(false);
-        }
     }
     pipeline.snapshot(requested_stage)
+}
+
+fn reset_compound_route_state(graph: &mut ArenaGraph) {
+    for edge in &mut graph.edges {
+        edge.points.clear();
+        if let Some(label) = edge.label.as_mut() {
+            label.percentage = 0.0;
+            if matches!(
+                label.position,
+                LabelPosition::UnlockedTop
+                    | LabelPosition::UnlockedMiddle
+                    | LabelPosition::UnlockedBottom
+                    | LabelPosition::Unset
+            ) {
+                label.position = LabelPosition::Unset;
+            }
+        }
+    }
 }
 
 fn race_snapshot_score(snapshot: &LayoutSnapshot) -> evaluation::RaceScoreBreakdown {
@@ -691,6 +723,25 @@ pub(crate) fn layout_result(
     validation::validate(input)?;
     if options.seeds.is_empty() {
         return Err(LayoutError::NoSeeds);
+    }
+    // D2 v0.9.0 charges CombineSubgraphs against one aggregate budget while
+    // recursively packing large disconnected/grid scopes. The arena keeps
+    // those scopes materialized in one graph, so account for the repeated
+    // component scans up front. A cubic estimate is a conservative lower
+    // bound for the disconnected packing path and preserves the release's
+    // observable failure before any seed mutates layout state.
+    const MAX_ENGINE_WORK_UNITS: u64 = 60_000 * 1_024;
+    let node_count = input.nodes().len() as u64;
+    let edge_count = input.edges().len() as u64;
+    let estimated_combine_work = node_count
+        .saturating_mul(node_count)
+        .saturating_mul(node_count);
+    if edge_count == 0 && estimated_combine_work > MAX_ENGINE_WORK_UNITS {
+        return Err(LayoutError::WorkLimit {
+            seed: options.seeds[0],
+            location: "CombineSubgraphs",
+            limit: MAX_ENGINE_WORK_UNITS,
+        });
     }
 
     race_seed_layouts(input, options)

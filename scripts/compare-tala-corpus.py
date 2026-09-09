@@ -27,6 +27,8 @@ def layout(
         return None, f"timeout after {timeout:g}s"
     if result.returncode:
         message = result.stderr.decode(errors="replace").strip().splitlines()
+        if message and message[-1].startswith("err: "):
+            message[-1] = message[-1][5:]
         return None, message[-1] if message else f"exit {result.returncode}"
     return json.loads(result.stdout), None
 

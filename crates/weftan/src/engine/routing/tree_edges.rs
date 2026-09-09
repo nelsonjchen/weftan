@@ -164,7 +164,39 @@ pub(super) fn route_tree_edge(
     // reports the source-to-target orientation separately when the serialized
     // edge runs parent→child.
     let child_is_source = edge.from == node;
-    let geometry_orientation = tree.orientation;
+    // `Graph.mirrorAxes` mirrors the node rectangles through a shared pointer
+    // projection.  The recovered Go tree carrier is mirrored with that
+    // projection, while the stable Rust carrier can retain its pre-mirror
+    // orientation.  Reconcile the carrier with the published geometry before
+    // selecting the cardinal ports; otherwise a rightward fanout can route
+    // from the parent's left border even though the child is to its right.
+    let geometry_orientation = match tree.orientation {
+        Orientation::Left | Orientation::Right => {
+            let delta = child_rect.center().x - parent_rect.center().x;
+            if delta.abs() > f64::EPSILON {
+                if delta > 0.0 {
+                    Orientation::Right
+                } else {
+                    Orientation::Left
+                }
+            } else {
+                tree.orientation
+            }
+        }
+        Orientation::Top | Orientation::Bottom => {
+            let delta = child_rect.center().y - parent_rect.center().y;
+            if delta.abs() > f64::EPSILON {
+                if delta > 0.0 {
+                    Orientation::Bottom
+                } else {
+                    Orientation::Top
+                }
+            } else {
+                tree.orientation
+            }
+        }
+        _ => tree.orientation,
+    };
     let (parent_side, child_side) = cardinal_sides(geometry_orientation)?;
     let route_orientation = if child_is_source {
         geometry_orientation
@@ -198,7 +230,6 @@ pub(super) fn route_tree_edge(
         parent_port.point,
         child_port.point,
     )?;
-
     let (points, source_port, target_port, source_midpoint, target_midpoint) = if child_is_source {
         (
             vec![

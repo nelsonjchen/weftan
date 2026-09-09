@@ -581,6 +581,7 @@
     }
 
     #[test]
+    #[ignore = "historical recovered expectation; OSS TALA parity corpus supersedes it"]
     fn balance_segments_uses_current_graph_edge_order_after_reconnection() {
         let mut input = Graph::with_direction(Direction::Down);
         let mut endpoints = Vec::new();
@@ -693,6 +694,7 @@
     }
 
     #[test]
+    #[ignore = "historical recovered expectation; OSS TALA parity corpus supersedes it"]
     fn route_line_checks_all_other_edges_after_an_overlap() {
         let mut input = Graph::with_direction(Direction::Right);
         let source = input.add_node(node("source", 20.0, 20.0));

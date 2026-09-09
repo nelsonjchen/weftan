@@ -43,6 +43,14 @@ impl Pipeline {
         for (&stable, state) in self.graph.tree_routing_nodes.iter_mut() {
             let tala_id = stable_tala_ids[stable.0 as usize];
             if let Some(&orientation) = placed_orientation_by_tala.get(&tala_id) {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_TREE_ORIENT")
+                    && matches!(tala_id, 1171112347 | 1154334728 | 1271778061 | 1187889966)
+                {
+                    eprintln!(
+                        "TREE_ORIENT_PUBLISH_RUST tala={} from={:?} to={:?}",
+                        tala_id, state.orientation, orientation
+                    );
+                }
                 state.orientation = orientation;
             }
         }
@@ -834,6 +842,19 @@ impl Pipeline {
                 if let Some(projected) = scope.tree_routing_nodes.get(&local)
                     && let Some(state) = self.graph.tree_routing_nodes.get_mut(&old)
                 {
+                    if crate::engine::trace_env_enabled("WEFTAN_TRACE_TREE_ORIENT")
+                        && matches!(
+                            self.graph.nodes[old.0 as usize].tala_id,
+                            1171112347 | 1154334728 | 1271778061 | 1187889966
+                        )
+                    {
+                        eprintln!(
+                            "TREE_ORIENT_SCOPE_COPY_RUST tala={} from={:?} to={:?}",
+                            self.graph.nodes[old.0 as usize].tala_id,
+                            state.orientation,
+                            projected.orientation
+                        );
+                    }
                     state.orientation = projected.orientation;
                 }
             }
@@ -1329,54 +1350,61 @@ impl Pipeline {
         // branching child scope in that already-combined order. Restore only
         // those multi-child snapshots; single-child scopes are refitted by
         // the replayed container translation itself.
-        for placed_children in root.transaction_external_container_children.values() {
-            if placed_children.len() <= 1 {
-                continue;
-            }
-            let child_ids = placed_children
-                .iter()
-                .filter_map(|placed_child| {
-                    self.graph
+        if self
+            .graph
+            .nodes
+            .iter()
+            .any(|node| node.fixed_top_left.is_some())
+        {
+            for placed_children in root.transaction_external_container_children.values() {
+                if placed_children.len() <= 1 {
+                    continue;
+                }
+                let child_ids = placed_children
+                    .iter()
+                    .filter_map(|placed_child| {
+                        self.graph
+                            .nodes
+                            .iter()
+                            .position(|node| node.tala_id == placed_child.tala_id)
+                            .map(|index| NodeId(index as u32))
+                    })
+                    .collect::<BTreeSet<_>>();
+                let mut sibling_edge_counts = BTreeMap::<(NodeId, NodeId), usize>::new();
+                for edge in &self.graph.edges {
+                    if !child_ids.contains(&edge.from) || !child_ids.contains(&edge.to) {
+                        continue;
+                    }
+                    *sibling_edge_counts.entry((edge.from, edge.to)).or_default() += 1;
+                }
+                let child_y_span = placed_children
+                    .iter()
+                    .filter_map(|child| child.position.map(|position| position.y))
+                    .fold(None, |span: Option<(f64, f64)>, y| {
+                        Some(span.map_or((y, y), |(minimum, maximum)| {
+                            (minimum.min(y), maximum.max(y))
+                        }))
+                    })
+                    .map_or(0.0, |(minimum, maximum)| maximum - minimum);
+                if !sibling_edge_counts.values().any(|count| *count > 1) || child_y_span <= 10.0 {
+                    continue;
+                }
+                for placed_child in placed_children {
+                    let Some(position) = placed_child.position else {
+                        continue;
+                    };
+                    let Some(owner_index) = self
+                        .graph
                         .nodes
                         .iter()
                         .position(|node| node.tala_id == placed_child.tala_id)
-                        .map(|index| NodeId(index as u32))
-                })
-                .collect::<BTreeSet<_>>();
-            let mut sibling_edge_counts = BTreeMap::<(NodeId, NodeId), usize>::new();
-            for edge in &self.graph.edges {
-                if !child_ids.contains(&edge.from) || !child_ids.contains(&edge.to) {
-                    continue;
+                    else {
+                        continue;
+                    };
+                    self.graph.nodes[owner_index].position = Some(position);
+                    self.graph.nodes[owner_index].rect.origin = placed_child.rect.origin;
+                    self.graph.nodes[owner_index].rect.size = placed_child.rect.size;
                 }
-                *sibling_edge_counts.entry((edge.from, edge.to)).or_default() += 1;
-            }
-            let child_y_span = placed_children
-                .iter()
-                .filter_map(|child| child.position.map(|position| position.y))
-                .fold(None, |span: Option<(f64, f64)>, y| {
-                    Some(span.map_or((y, y), |(minimum, maximum)| {
-                        (minimum.min(y), maximum.max(y))
-                    }))
-                })
-                .map_or(0.0, |(minimum, maximum)| maximum - minimum);
-            if !sibling_edge_counts.values().any(|count| *count > 1) || child_y_span <= 10.0 {
-                continue;
-            }
-            for placed_child in placed_children {
-                let Some(position) = placed_child.position else {
-                    continue;
-                };
-                let Some(owner_index) = self
-                    .graph
-                    .nodes
-                    .iter()
-                    .position(|node| node.tala_id == placed_child.tala_id)
-                else {
-                    continue;
-                };
-                self.graph.nodes[owner_index].position = Some(position);
-                self.graph.nodes[owner_index].rect.origin = placed_child.rect.origin;
-                self.graph.nodes[owner_index].rect.size = placed_child.rect.size;
             }
         }
         self.publish_mirrored_external_child_offsets(&mirrored_external_child_offsets);
@@ -1406,6 +1434,19 @@ impl Pipeline {
             if let Some(projected) = root.tree_routing_nodes.get(&local)
                 && let Some(state) = self.graph.tree_routing_nodes.get_mut(&old)
             {
+                if crate::engine::trace_env_enabled("WEFTAN_TRACE_TREE_ORIENT")
+                    && matches!(
+                        self.graph.nodes[old.0 as usize].tala_id,
+                        1171112347 | 1154334728 | 1271778061 | 1187889966
+                    )
+                {
+                    eprintln!(
+                        "TREE_ORIENT_ROOT_COPY_RUST tala={} from={:?} to={:?}",
+                        self.graph.nodes[old.0 as usize].tala_id,
+                        state.orientation,
+                        projected.orientation
+                    );
+                }
                 state.orientation = projected.orientation;
             }
         }

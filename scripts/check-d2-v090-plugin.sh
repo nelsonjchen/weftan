@@ -14,9 +14,12 @@ tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/weftan-d2-plugin.XXXXXX")"
 cleanup() { rm -rf "$tmp_root"; }
 trap cleanup EXIT HUP INT TERM
 
-cargo build --manifest-path "$workspace/Cargo.toml" -p d2plugin-weftan >/dev/null
-plugin_directory="$workspace/target/debug"
 plugin="$plugin_directory/d2plugin-weftan"
+if [[ ! -x "$plugin" ]]; then
+  cargo build --manifest-path "$workspace/Cargo.toml" -p d2plugin-weftan >/dev/null
+  plugin_directory="$workspace/target/debug"
+  plugin="$plugin_directory/d2plugin-weftan"
+fi
 
 info="$($plugin info)"
 flags="$($plugin flags)"

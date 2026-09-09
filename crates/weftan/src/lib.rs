@@ -1345,6 +1345,19 @@ pub enum LayoutError {
     /// Routing reached an internal state that violates a required invariant.
     #[error("Reached a bad state: {0}")]
     BadRouteState(String),
+    /// The recovered CombineSubgraphs operation exceeded D2's aggregate
+    /// engine work budget before a seed could publish a candidate.
+    #[error(
+        "all TALA seed attempts failed: seed {seed}: TALA {location} work exceeds limit {limit}"
+    )]
+    WorkLimit {
+        /// Seed whose candidate hit the aggregate work budget.
+        seed: i64,
+        /// TALA operation that exhausted its budget.
+        location: &'static str,
+        /// Maximum accepted work units.
+        limit: u64,
+    },
 }
 
 #[derive(Clone, Debug, Default)]

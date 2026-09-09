@@ -139,13 +139,32 @@ pub(super) fn edges_can_overlap_all(
     let edge = &graph.edges[edge_index];
     let source_cluster = endpoint_cluster_members(graph, edge.from);
     let target_cluster = endpoint_cluster_members(graph, edge.to);
-    edges_can_overlap_all_with_members(
+    let result = edges_can_overlap_all_with_members(
         graph,
         edge_index,
         other_indices,
         source_cluster.as_ref(),
         target_cluster.as_ref(),
-    )
+    );
+    if crate::engine::trace_env_enabled("WEFTAN_TRACE_OVERLAP") && edge_index == 4 {
+        eprintln!(
+            "OVERLAP_RUST edge={} others={:?} source_arrow={} target_arrow={} result={}",
+            edge_index, other_indices, edge.source_arrow, edge.target_arrow, result
+        );
+        for index in other_indices {
+            let other = &graph.edges[*index];
+            eprintln!(
+                "OVERLAP_RUST_OTHER index={} from={} to={} source_arrow={} target_arrow={} style_equal={}",
+                index,
+                other.from.0,
+                other.to.0,
+                other.source_arrow,
+                other.target_arrow,
+                other.style == edge.style
+            );
+        }
+    }
+    result
 }
 
 /// Search-specific table-column augmentation of TALA's cluster maps. RouteLine

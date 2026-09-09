@@ -71,10 +71,10 @@ fn routes_can_swap_edges_with_ports(
         let Some((other_from, other_to)) = selected_ports[other_index] else {
             continue;
         };
-        if [first_from, first_to, second_from, second_to]
+        let endpoint_conflict = [first_from, first_to, second_from, second_to]
             .into_iter()
-            .any(|port| port == other_from || port == other_to)
-        {
+            .any(|port| port == other_from || port == other_to);
+        if endpoint_conflict {
             return false;
         }
     }
@@ -105,13 +105,14 @@ pub(in crate::engine) fn assign_swappable_routes_in_edge_order(
             if seen[second_index] || routes[second_index].is_empty() {
                 continue;
             }
-            if routes_can_swap_edges_with_ports(
+            let can_swap = routes_can_swap_edges_with_ports(
                 graph,
                 routes,
                 selected_ports,
                 first_index,
                 second_index,
-            ) {
+            );
+            if can_swap {
                 bucket.push(second_index);
                 seen[second_index] = true;
             }

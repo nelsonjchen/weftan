@@ -22,6 +22,15 @@ fn same_base_port(first: Port, second: Port) -> bool {
         && first.is_center == second.is_center
 }
 
+/// Tunnel ports are the endpoints of one specific OVG tunnel edge.  A route
+/// may use both endpoints of that lane, or ordinary ports, but it must not
+/// borrow one endpoint for an unrelated edge.  The flattened Rust inventory
+/// contains the aliases independently, so enforce the ownership rule at each
+/// candidate boundary just as the Go OVG does.
+fn mismatched_tunnel_endpoints(source: Port, target: Port) -> bool {
+    (source.tunnel.is_some() || target.tunnel.is_some()) && source.tunnel != target.tunnel
+}
+
 fn table_port_allowed(allowed: &Option<Vec<Port>>, candidate: Port) -> bool {
     allowed.as_ref().is_none_or(|ports| {
         ports
@@ -1856,20 +1865,6 @@ fn route_edges_in_order(
     Vec<Option<(Port, Port)>>,
     Option<String>,
 ) {
-    let trace_edge = std::env::var("WEFTAN_TRACE_ROUTE_EDGE")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok());
-    let trace_route = |edge_index: usize, phase: &str, route: &[Point], extra: &str| {
-        if trace_edge == Some(edge_index) {
-            let edge = &graph.edges[edge_index];
-            eprintln!(
-                "ROUTE_EDGE_RUST phase={phase} edge={edge_index} from={} to={} route_len={} route={route:?} {extra}",
-                graph.nodes[edge.from.0 as usize].tala_id,
-                graph.nodes[edge.to.0 as usize].tala_id,
-                route.len(),
-            );
-        }
-    };
     let RouteOvgContext {
         boxes,
         mut node_ports,
@@ -2083,19 +2078,6 @@ fn route_edges_in_order(
 
     for edge_index in ordered_edges.iter().copied() {
         let edge = &graph.edges[edge_index];
-        if trace_edge == Some(edge_index) {
-            eprintln!(
-                "ROUTE_EDGE_RUST phase=consider edge={edge_index} from={} to={} orientation={:?} reverse={:?} border_distance={} tree={} loop={} fixed={}",
-                graph.nodes[edge.from.0 as usize].tala_id,
-                graph.nodes[edge.to.0 as usize].tala_id,
-                graph.sized_orientation(edge.from, edge.to),
-                graph.sized_orientation(edge.to, edge.from),
-                graph.sized_distance_to(edge.from, edge.to),
-                graph.is_tree_edge(crate::EdgeId(edge_index as u32)),
-                edge.from == edge.to,
-                fixed_routes.is_some(),
-            );
-        }
         let orientation = graph.sized_orientation(edge.from, edge.to);
         let reverse_orientation = graph.sized_orientation(edge.to, edge.from);
         if (edge.from == edge.to && fixed_routes.is_none())
@@ -2127,7 +2109,6 @@ fn route_edges_in_order(
             total_score += line.cost;
             routes[edge_index] = vec![line.source.point, line.target.point];
             interaction_index.add_route(graph, edge_index, &routes[edge_index], trace_flavor);
-            trace_route(edge_index, "quick_route", &routes[edge_index], "");
             continue;
         }
         if let Some(route) = super::slingshot::l_route(
@@ -2139,12 +2120,12 @@ fn route_edges_in_order(
             &routes,
             &interaction_index,
             trace_flavor,
-        ) {
+        ) && !mismatched_tunnel_endpoints(route.source, route.target)
+        {
             selected_ports[edge_index] = Some((route.source, route.target));
             total_score += route.cost;
             routes[edge_index] = route.points;
             interaction_index.add_route(graph, edge_index, &routes[edge_index], trace_flavor);
-            trace_route(edge_index, "l_route", &routes[edge_index], "");
             continue;
         }
         if let Some(route) = super::slingshot::s_route(
@@ -2156,12 +2137,12 @@ fn route_edges_in_order(
             &routes,
             &interaction_index,
             trace_flavor,
-        ) {
+        ) && !mismatched_tunnel_endpoints(route.source, route.target)
+        {
             selected_ports[edge_index] = Some((route.source, route.target));
             total_score += route.cost;
             routes[edge_index] = route.points;
             interaction_index.add_route(graph, edge_index, &routes[edge_index], trace_flavor);
-            trace_route(edge_index, "s_route", &routes[edge_index], "");
             continue;
         }
         // Recovered search builds facing-port sets with
@@ -2357,15 +2338,26 @@ fn route_edges_in_order(
             })
         };
         let mut best: Option<(f64, Port, Port, Vec<Point>)> = None;
-        if trace_edge == Some(edge_index) {
-            eprintln!(
-                "ROUTE_EDGE_RUST phase=ports edge={edge_index} source_box={:?} target_box={:?} source_ports={:?} target_ports={:?}",
-                boxes.get(&edge.from),
-                boxes.get(&edge.to),
-                node_ports.get(&edge.from),
-                node_ports.get(&edge.to),
-            );
-        }
+        // When the opposite parallel edge has already claimed the ordinary
+        // center corridor, OSS TALA's duplicate-port guard routes this edge
+        // through the first available direct tunnel. The flattened adapter
+        // can otherwise let the visibility search retain a later equal-cost
+        // tunnel alias (or the center corridor) because aliases are separate
+        // Rust values even when Go reuses one OVG node.
+        let reverse_parallel_already_selected =
+            selected_ports
+                .iter()
+                .enumerate()
+                .any(|(other_index, selected)| {
+                    selected.is_some()
+                        && routes
+                            .get(other_index)
+                            .is_some_and(|route| !route.is_empty())
+                        && {
+                            let other = &graph.edges[other_index];
+                            other.from == edge.to && other.to == edge.from
+                        }
+                });
         let dedup_candidate_ports = |ports: &[Port]| {
             let mut seen = BTreeMap::<(u64, u64), usize>::new();
             let mut result: Vec<Port> = Vec::new();
@@ -2470,8 +2462,79 @@ fn route_edges_in_order(
                 &interaction_index,
                 &boxes,
                 overlap,
-            ) {
+            ) && !mismatched_tunnel_endpoints(route.source, route.target)
+            {
                 best = Some((route.cost, route.source, route.target, route.points));
+            }
+            // Go interns tunnel endpoints in the OVG before running the
+            // multi-source search. When two direct tunnel lanes have the same
+            // score, that shared-node representation keeps the first lane
+            // generated by BuildTunnels. The flattened Rust port list carries
+            // both aliases independently, so the heap may otherwise retain a
+            // later equal-cost lane. Re-evaluate direct tunnel pairs with the
+            // same port penalties and use the stable coordinate tie-break.
+            if reverse_parallel_already_selected {
+                let current_best_cost = best.as_ref().map(|route| route.0);
+                let mut direct_tunnel_best = None;
+                for (source, source_penalty) in source_candidates
+                    .iter()
+                    .filter(|(port, _)| port.tunnel.is_some())
+                {
+                    for (target, target_penalty) in target_candidates
+                        .iter()
+                        .filter(|(port, _)| port.tunnel == source.tunnel)
+                    {
+                        let Some(route) = visibility.route_to_any(
+                            graph,
+                            *source,
+                            &[(*target, 0.0)],
+                            edge.from,
+                            edge.to,
+                            Some(edge_index),
+                            &interaction_index,
+                            &boxes,
+                        ) else {
+                            continue;
+                        };
+                        if route.points.len() != 2 {
+                            continue;
+                        }
+                        // route_to_any starts at the source port and removes
+                        // the unit center-to-port hop from its public cost;
+                        // route_between_any includes that hop.
+                        let cost = route.cost + 1.0 + source_penalty + target_penalty;
+                        let replace = direct_tunnel_best.as_ref().is_none_or(
+                            |current: &(f64, Port, Port, Vec<Point>)| {
+                                routing_precision_compare(cost, current.0)
+                                    == std::cmp::Ordering::Less
+                                    || (routing_precision_compare(cost, current.0)
+                                        == std::cmp::Ordering::Equal
+                                        && (route.source.point.x < current.1.point.x
+                                            || (route.source.point.x == current.1.point.x
+                                                && (route.source.point.y < current.1.point.y
+                                                    || (route.source.point.y
+                                                        == current.1.point.y
+                                                        && (route.target.point.x
+                                                            < current.2.point.x
+                                                            || (route.target.point.x
+                                                                == current.2.point.x
+                                                                && route.target.point.y
+                                                                    < current.2.point.y)))))))
+                            },
+                        );
+                        if replace {
+                            direct_tunnel_best =
+                                Some((cost, route.source, route.target, route.points));
+                        }
+                    }
+                }
+                if let Some(route) = direct_tunnel_best
+                    && current_best_cost.is_none_or(|cost| {
+                        routing_precision_compare(route.0, cost) != std::cmp::Ordering::Greater
+                    })
+                {
+                    best = Some(route);
+                }
             }
         }
         if best.is_none() {
@@ -2483,11 +2546,19 @@ fn route_edges_in_order(
                     if !table_port_allowed(&allowed_target_ports, target) {
                         continue;
                     }
-                    if (source.tunnel.is_some() || target.tunnel.is_some())
-                        && source.tunnel != target.tunnel
-                    {
+                    // A tunnel endpoint belongs to its paired tunnel lane.
+                    // It may not be selected as the source or target of an
+                    // unrelated edge; doing so manufactures a shorter route
+                    // through another edge's container passage.
+                    if mismatched_tunnel_endpoints(source, target) {
                         continue;
                     }
+                    // Tunnel labels are local to the flattened port inventory:
+                    // sequence/cluster projection can retain multiple aliases
+                    // for one OVG endpoint, so equal numeric labels are not a
+                    // reliable cross-owner identity. The visibility graph owns
+                    // the actual tunnel adjacency; let it reject unreachable
+                    // pairs instead of filtering by the diagnostic label here.
                     let source_on_tunnel = source.tunnel.is_none()
                         && node_ports[&edge.from]
                             .iter()
@@ -2520,14 +2591,25 @@ fn route_edges_in_order(
                         &boxes,
                     );
                     if !visibility_route.is_empty() {
-                        candidate_routes.push(visibility_route);
+                        let tunnel_diagonal = source.tunnel.is_some()
+                            && source.tunnel != target.tunnel
+                            && visibility_route
+                                .windows(2)
+                                .any(|pair| pair[0].x != pair[1].x && pair[0].y != pair[1].y);
+                        if !tunnel_diagonal {
+                            candidate_routes.push(visibility_route);
+                        }
                     }
                     let endpoint_on_tunnel = source_on_tunnel || target_on_tunnel;
                     let direct_route = if split_flat_scope {
                         // Ordinary TALA routing searches the staged OVG. It does
                         // not add a second family of synthetic orthogonal elbows.
                         Vec::new()
-                    } else if source.tunnel.is_some() {
+                    } else if source.tunnel.is_some() && target.tunnel == source.tunnel {
+                        // A tunnel endpoint may take the direct OVG edge only
+                        // to its paired endpoint. The released router cannot
+                        // jump diagonally from a tunnel owned by another edge
+                        // to an unrelated ordinary target port.
                         vec![source.point, target.point]
                     } else if source.side != target.side
                         && source.side != opposite(target.side)
@@ -2641,17 +2723,10 @@ fn route_edges_in_order(
             }
         }
         if let Some((score, source, target, route)) = best {
-            if trace_edge == Some(edge_index) {
-                eprintln!(
-                    "ROUTE_EDGE_SCORE_RUST flavor={trace_flavor} edge={edge_index} score={score:.17e} source={:?} target={:?}",
-                    source, target
-                );
-            }
             selected_ports[edge_index] = Some((source, target));
             total_score += score;
             routes[edge_index] = route;
             interaction_index.add_route(graph, edge_index, &routes[edge_index], trace_flavor);
-            trace_route(edge_index, "ovg_route", &routes[edge_index], "");
         } else if let Some(line) = route_line::route_line(
             graph,
             edge_index,
@@ -2665,7 +2740,6 @@ fn route_edges_in_order(
             total_score += line.cost;
             routes[edge_index] = vec![line.source.point, line.target.point];
             interaction_index.add_route(graph, edge_index, &routes[edge_index], trace_flavor);
-            trace_route(edge_index, "fallback_route_line", &routes[edge_index], "");
         } else if let Some((route, cost)) = route_line::clipped_center_fallback(graph, edge_index) {
             // Recovered ovgEdgeRouter.routeLine catches Graph.RouteLine's
             // IllegalMove and clips the center line to both boxes. These are
@@ -2673,15 +2747,8 @@ fn route_edges_in_order(
             total_score += cost;
             routes[edge_index] = route;
             interaction_index.add_route(graph, edge_index, &routes[edge_index], trace_flavor);
-            trace_route(
-                edge_index,
-                "clipped_center_fallback",
-                &routes[edge_index],
-                "",
-            );
         } else {
             unrouted += 1;
-            trace_route(edge_index, "unrouted", &routes[edge_index], "");
         }
         if let Some(ports) = saved_cluster_source_ports {
             node_ports.insert(edge.from, ports);
@@ -2883,6 +2950,12 @@ fn route_edge_subset(
             eprintln!(
                 "ROUTE_FLAVOR_RUST flavor={flavor} unrouted={} distance={:.17e}",
                 candidate.1, candidate.2
+            );
+        }
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_ROUTE_ALL_FLAVORS") {
+            eprintln!(
+                "ROUTE_FLAVOR_LENS flavor={flavor} lens={:?}",
+                candidate.0.iter().map(Vec::len).collect::<Vec<_>>()
             );
         }
         if best.as_ref().is_none_or(|current| {

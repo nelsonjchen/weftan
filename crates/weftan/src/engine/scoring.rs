@@ -426,10 +426,14 @@ impl ArenaGraph {
     // Recovered Node.distanceTo excludes distanceBetweenCenters. Near scoring
     // uses this border-only form rather than the ordinary edge distance.
     pub(super) fn sized_distance_to(&self, a: NodeId, b: NodeId) -> f64 {
-        let a_position = self.position(a).unwrap();
-        let b_position = self.position(b).unwrap();
-        let a_size = self.nodes[a.0 as usize].rect.size;
-        let b_size = self.nodes[b.0 as usize].rect.size;
+        // Node.DistanceTo reads the live Graph node boxes. Stable arena
+        // owners retain member dimensions while an active sequence/cluster
+        // vessel carries the aggregate box, so use the active projection for
+        // both positions and sizes.
+        let a_position = self.active_node_position(a).unwrap();
+        let b_position = self.active_node_position(b).unwrap();
+        let a_size = self.active_node_size(a);
+        let b_size = self.active_node_size(b);
         let dx = if b_position.x + b_size.width < a_position.x {
             a_position.x - (b_position.x + b_size.width)
         } else if a_position.x + a_size.width < b_position.x {
@@ -589,6 +593,30 @@ impl ArenaGraph {
             self.turn_cost,
             self.non_center_port_cost,
         );
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_SCORING_INIT") {
+            eprintln!(
+                "SCORING_INIT_RUST max={:.17} routing_max={:.17} nodes={} graph_nodes={} edges={} active_edges={} turn={:.17} crossing={:.17}",
+                max_length,
+                routing_max_length,
+                self.node_order.len(),
+                self.graph_node_order().len(),
+                self.edges.len(),
+                self.active_graph_edge_count(),
+                self.turn_cost,
+                self.crossing_cost,
+            );
+            eprintln!(
+                "SCORING_INIT_NODES_RUST {:?}",
+                self.graph_node_order()
+                    .iter()
+                    .filter_map(|node| self.active_node_position(*node).map(|position| (
+                        self.nodes[node.0 as usize].tala_id,
+                        position,
+                        self.active_node_size(*node)
+                    )))
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     pub(super) fn initialize_combined_scoring_costs(&mut self) {
@@ -876,6 +904,35 @@ impl ArenaGraph {
                     .any(|id| id == projected.tala_id)
             })
             .unwrap_or(false);
+        // Cluster edge abductions retain the member identity but their
+        // original offset is only a snapshot from before the vessel's latest
+        // move/flip. OSS TALA keeps the member pointer live, so reconstruct
+        // its current arranged box from the active vessel on every trial.
+        if projected.cluster_member
+            && let Some(cluster_index) = self.active_cluster_index(projected.owner)
+            && let Some(member) = self.clusters[cluster_index]
+                .members
+                .iter()
+                .copied()
+                .find(|member| self.nodes[member.0 as usize].tala_id == projected.tala_id)
+            && let Some((offset, size)) = self.cluster_member_geometry(cluster_index, member)
+            && let Some(owner) = self.active_node_position(projected.owner)
+        {
+            let position = Point {
+                x: owner.x + offset.x,
+                y: owner.y + offset.y,
+            };
+            if trace_projected {
+                eprintln!(
+                    "PROJECTED_BOX_RUST id={} owner={} source=live-cluster memberPos={:?} size={:?}",
+                    projected.tala_id,
+                    self.nodes[projected.owner.0 as usize].tala_id,
+                    position,
+                    size,
+                );
+            }
+            return Some((position, size));
+        }
         // Go's induced graph retains the original child pointer.  A trial
         // move therefore changes the child box immediately, and every score
         // in that same trial observes the new absolute position.  Rust keeps
@@ -1040,9 +1097,7 @@ impl ArenaGraph {
                 return Some(ProjectedAdjacent {
                     owner,
                     tala_id: cluster.vessel_tala_id,
-                    container_tala_id: self.nodes[owner.0 as usize]
-                        .container
-                        .map(|container| self.nodes[container.0 as usize].tala_id),
+                    container_tala_id: None,
                     offset: Point::default(),
                     size: self.cluster_vessel_size(cluster_index),
                     cluster_member: false,
@@ -1061,9 +1116,7 @@ impl ArenaGraph {
             return Some(ProjectedAdjacent {
                 owner: cluster.members[0],
                 tala_id,
-                container_tala_id: self.nodes[member.0 as usize]
-                    .container
-                    .map(|container| self.nodes[container.0 as usize].tala_id),
+                container_tala_id: None,
                 offset,
                 size,
                 cluster_member: true,
@@ -1075,14 +1128,7 @@ impl ArenaGraph {
                 let (offset, size) = self
                     .sequence_member_geometry(sequence_index, endpoint)
                     .expect("active sequence member geometry");
-                (
-                    offset,
-                    size,
-                    self.nodes[endpoint.0 as usize].tala_id,
-                    self.nodes[endpoint.0 as usize]
-                        .container
-                        .map(|container| self.nodes[container.0 as usize].tala_id),
-                )
+                (offset, size, self.nodes[endpoint.0 as usize].tala_id, None)
             } else {
                 (
                     Point::default(),
@@ -1298,13 +1344,7 @@ impl ArenaGraph {
             x: other_box.0.x + other_box.1.width * 0.5,
             y: other_box.0.y + other_box.1.height * 0.5,
         };
-        if crate::engine::trace_env_enabled("WEFTAN_TRACE_CLUSTER_PENALTY")
-            && projected.tala_id == 1445424226
-            && self
-                .nodes
-                .get(current_other.0 as usize)
-                .is_some_and(|node| node.tala_id == 2749337804)
-        {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_CLUSTER_PENALTY") {
             eprintln!(
                 "CLUSTER_PENALTY_RUST projected={} arrangement={:?} vessel={:?} other={:?} this={:?} turn={} externalCount={}",
                 projected.tala_id,
@@ -3193,6 +3233,18 @@ impl ArenaGraph {
         if !nears.is_empty() {
             let mut minimum = f64::INFINITY;
             for near in nears {
+                if trace_sized_detail {
+                    eprintln!(
+                        "SIZED_NEAR_RUST node={} near={} nodePos={:?} nearPos={:?} nodeSize={:?} nearSize={:?} distance={}",
+                        self.nodes[node.0 as usize].tala_id,
+                        self.nodes[near.0 as usize].tala_id,
+                        self.position(node),
+                        self.position(near),
+                        self.active_node_size(node),
+                        self.active_node_size(near),
+                        self.sized_distance_to(node, near)
+                    );
+                }
                 if self.position(near).is_none() {
                     minimum = 0.0;
                     continue;
@@ -3213,6 +3265,15 @@ impl ArenaGraph {
                 self.common_uncle_penalty(node, true),
                 flow_continuity,
                 near_count,
+            );
+        }
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_EDGE_TOTAL_RUST") {
+            eprintln!(
+                "EDGE_TOTAL_RUST node={} pos={:?} total={:.17} edges={}",
+                self.nodes[node.0 as usize].tala_id,
+                self.active_node_position(node),
+                total,
+                self.active_edge_count(node),
             );
         }
         total
@@ -3255,7 +3316,12 @@ impl ArenaGraph {
             || active_edges.len() < 2
             || active_edges.len() > 8
             || node_ref.cluster.is_some()
-            || node_ref.sequence.is_some()
+            // AddSequence replaces its members with a vessel whose Sequence
+            // pointer is nil in the recovered Go graph. The stable arena
+            // keeps the owner member's historical pointer, so permit flow
+            // scoring for an active sequence vessel while continuing to skip
+            // a detached ordinary sequence member.
+            || (node_ref.sequence.is_some() && !self.active_node_is_aggregate(node))
             || node_ref.herd_assignment.is_some()
             // A placement scope may contain a container carrier without
             // materializing its descendants in the temporary graph. OSS
@@ -3306,13 +3372,17 @@ impl ArenaGraph {
                 .unwrap_or_default();
             if trace_flow {
                 eprintln!(
-                    "FLOW_RESTORED_RUST edge={} adjacent={} restoredNode={:?} restoredAdjacent={:?}",
+                    "FLOW_RESTORED_RUST edge={} adjacent={} nodeContainer={:?} restoredNode={:?} restoredAdjacent={:?} adjacentContainer={:?}",
                     edge_id.0,
                     self.nodes[self.active_adjacent(node, edge_id).0 as usize].tala_id,
+                    node_container,
                     restored
                         .node
                         .map(|projected| self.nodes[projected.owner.0 as usize].tala_id),
                     restored.adjacent.map(|projected| projected.tala_id),
+                    restored
+                        .adjacent
+                        .and_then(|projected| projected.container_tala_id),
                 );
             }
             // OSS flowContinuityCost ignores an edge whose receiver endpoint
@@ -3336,13 +3406,16 @@ impl ArenaGraph {
             // `Container` field. A projected member carries that field in
             // `container_tala_id`; the active adjacent node is only the
             // temporary carrier used for the edge topology.
-            let adjacent_container = restored
-                .adjacent
-                .and_then(|projected| projected.container_tala_id)
-                .or_else(|| {
-                    self.active_node_container(adjacent)
-                        .map(|container| self.nodes[container.0 as usize].tala_id)
-                });
+            // A projected endpoint carries the replacement node's own
+            // `Container` field.  Go's AddCluster/AddSequence clears that
+            // field on vessel members, so `None` is meaningful and must not
+            // fall back to the stable arena member's historical parent.
+            let adjacent_container = if let Some(projected) = restored.adjacent {
+                projected.container_tala_id
+            } else {
+                self.active_node_container(adjacent)
+                    .map(|container| self.nodes[container.0 as usize].tala_id)
+            };
             if adjacent_container != node_container {
                 continue;
             }
@@ -3416,8 +3489,9 @@ impl ArenaGraph {
         }
         if trace_flow {
             eprintln!(
-                "FLOW_RAYS_RUST node={} count={} spine={} branchSum={} branches={} turn={} cost={}",
+                "FLOW_RAYS_RUST node={} pos={:?} count={} spine={} branchSum={} branches={} turn={} cost={}",
                 self.nodes[node.0 as usize].tala_id,
+                self.active_node_position(node),
                 rays.len(),
                 spine,
                 branch_sum,

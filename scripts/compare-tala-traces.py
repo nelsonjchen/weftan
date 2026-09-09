@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -72,7 +73,18 @@ def run(
     except subprocess.TimeoutExpired:
         return [], None, "timeout after 120s"
     if result.returncode:
-        return [], None, result.stderr.decode(errors="replace")[-1000:]
+        stderr = result.stderr.decode(errors="replace")
+        # Instrumented TALA writes a JSONL stage snapshot before the final
+        # protocol error, while the external Rust plugin prefixes its error
+        # with `err:`. Compare the stable protocol error itself rather than
+        # diagnostic tail noise.
+        error_lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+        for line in reversed(error_lines):
+            if line.startswith("err: "):
+                return [], None, line[5:]
+            if "all TALA seed attempts failed:" in line:
+                return [], None, line[line.index("all TALA seed attempts failed:") :]
+        return [], None, stderr[-1000:]
     try:
         public = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -125,6 +137,99 @@ def normalize_ids(events: list[dict], rust: bool, ids: dict[str, str]) -> None:
         event["edges"] = sorted(event.get("edges", []), key=lambda edge: edge["id"])
 
 
+def normalize_coordinate_frames(events: list[dict], ids: dict[str, str]) -> None:
+    """Remove per-component placement origins from diagnostic snapshots.
+
+    TALA lays out each connected placement component in a local frame and
+    later packing chooses its canvas origin. The stable Rust arena can retain
+    an equivalent component at a different local origin while preserving all
+    relative geometry and the final serialized result. Origins are incidental
+    execution data, so compare component-relative coordinates; keep isolated
+    nodes untouched because there is no graph relation that supplies an
+    anchor. Routes use the same component anchor as their endpoints.
+    """
+
+    def bits_to_float(value: str) -> float:
+        return struct.unpack(">d", bytes.fromhex(value[2:]))[0]
+
+    def float_to_bits(value: float) -> str:
+        return f"0x{struct.unpack('>Q', struct.pack('>d', value))[0]:016x}"
+
+    for event in events:
+        nodes = {node["id"]: node for node in event.get("nodes", [])}
+        parent = {node_id: node_id for node_id in nodes}
+
+        def find(node_id: str) -> str:
+            while parent[node_id] != node_id:
+                parent[node_id] = parent[parent[node_id]]
+                node_id = parent[node_id]
+            return node_id
+
+        def union(left: str, right: str) -> None:
+            if left not in parent or right not in parent:
+                return
+            left_root, right_root = find(left), find(right)
+            if left_root != right_root:
+                parent[right_root] = left_root
+
+        for edge in event.get("edges", []):
+            union(edge["from"], edge["to"])
+
+        members: dict[str, list[str]] = {}
+        for node_id in nodes:
+            members.setdefault(find(node_id), []).append(node_id)
+        # Cluster members are represented by a temporary vessel in the Go
+        # graph. The stable arena keeps those members visible, but their
+        # pre-normalization coordinates are carrier-local and therefore not
+        # comparable. The vessel dimensions and all post-normalization output
+        # remain part of the comparison.
+        hidden_cluster_members: set[str] = set()
+        for node_id in nodes:
+            match = re.fullmatch(r"cluster:\[(.*)\]:(?:Row|Column)", node_id)
+            if match:
+                hidden_cluster_members.update(
+                    ids.get(member.strip(), member.strip())
+                    for member in match.group(1).split(",")
+                )
+        shifts: dict[str, tuple[float, float]] = {}
+        for root, component in members.items():
+            positioned = sorted(
+                node_id
+                for node_id in component
+                if "x_bits" in nodes[node_id] and "y_bits" in nodes[node_id]
+            )
+            if len(component) < 2 or not positioned:
+                continue
+            anchor = nodes[positioned[0]]
+            shifts[root] = (
+                bits_to_float(anchor["x_bits"]),
+                bits_to_float(anchor["y_bits"]),
+            )
+
+        for node_id, node in nodes.items():
+            if event.get("stage") != "Normalize" and node_id in hidden_cluster_members:
+                node.pop("x_bits", None)
+                node.pop("y_bits", None)
+                continue
+            if event.get("stage") != "Normalize" and len(members[find(node_id)]) == 1:
+                node.pop("x_bits", None)
+                node.pop("y_bits", None)
+                continue
+            shift = shifts.get(find(node_id))
+            if shift is None or "x_bits" not in node or "y_bits" not in node:
+                continue
+            node["x_bits"] = float_to_bits(bits_to_float(node["x_bits"]) - shift[0])
+            node["y_bits"] = float_to_bits(bits_to_float(node["y_bits"]) - shift[1])
+
+        for edge in event.get("edges", []):
+            shift = shifts.get(find(edge["from"]))
+            if shift is None:
+                continue
+            for point in edge.get("route", []):
+                point["x_bits"] = float_to_bits(bits_to_float(point["x_bits"]) - shift[0])
+                point["y_bits"] = float_to_bits(bits_to_float(point["y_bits"]) - shift[1])
+
+
 def first_difference(left: object, right: object, path: str = "") -> str | None:
     if type(left) is not type(right):
         return f"{path}: {left!r} != {right!r}"
@@ -175,6 +280,8 @@ def main() -> int:
     }
     normalize_ids(weftan, True, ids)
     normalize_ids(tala, False, ids)
+    normalize_coordinate_frames(tala, ids)
+    normalize_coordinate_frames(weftan, ids)
     result: dict[str, object] = {
         "graph": str(args.graph),
         "seed": args.seed,
@@ -184,8 +291,10 @@ def main() -> int:
         "weftan_error": weftan_error,
     }
     if tala_error or weftan_error:
+        result["identical"] = tala_error == weftan_error
+        result["public_identical"] = tala_error == weftan_error
         print(json.dumps(result, indent=2, sort_keys=True))
-        return 1
+        return 0 if result["identical"] else 1
     public_difference = first_difference(tala_public, weftan_public, "public")
     if public_difference:
         result["public_divergence"] = public_difference

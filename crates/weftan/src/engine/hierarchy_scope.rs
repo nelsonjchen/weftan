@@ -1269,7 +1269,17 @@ impl Pipeline {
                 graph.external_edge_counts[projected.0 as usize] += count;
             }
         }
-
+        let aggregate_member = |node: NodeId| {
+            self.graph
+                .sequences
+                .iter()
+                .any(|sequence| sequence.members.contains(&node))
+                || self
+                    .graph
+                    .clusters
+                    .iter()
+                    .any(|cluster| cluster.members.contains(&node))
+        };
         let mut sized_adjacent_overrides = Vec::new();
         let mut sized_cluster_distance_boxes = BTreeMap::new();
         let mut sized_edge_abductions = Vec::new();
@@ -1398,9 +1408,13 @@ impl Pipeline {
                     let projected = ProjectedAdjacent {
                         owner: old_to_new[&source],
                         tala_id: self.graph.nodes[original.source.0 as usize].tala_id,
-                        container_tala_id: self.graph.nodes[original.source.0 as usize]
-                            .container
-                            .map(|container| self.graph.nodes[container.0 as usize].tala_id),
+                        container_tala_id: (!aggregate_member(original.source))
+                            .then(|| {
+                                self.graph.nodes[original.source.0 as usize]
+                                    .container
+                                    .map(|container| self.graph.nodes[container.0 as usize].tala_id)
+                            })
+                            .flatten(),
                         offset,
                         size,
                         cluster_member: cluster_member || retained_cluster.is_some(),
@@ -1481,9 +1495,13 @@ impl Pipeline {
                     let projected = ProjectedAdjacent {
                         owner: old_to_new[&target],
                         tala_id: self.graph.nodes[original.target.0 as usize].tala_id,
-                        container_tala_id: self.graph.nodes[original.target.0 as usize]
-                            .container
-                            .map(|container| self.graph.nodes[container.0 as usize].tala_id),
+                        container_tala_id: (!aggregate_member(original.target))
+                            .then(|| {
+                                self.graph.nodes[original.target.0 as usize]
+                                    .container
+                                    .map(|container| self.graph.nodes[container.0 as usize].tala_id)
+                            })
+                            .flatten(),
                         offset,
                         size,
                         cluster_member: cluster_member || retained_cluster.is_some(),
@@ -1956,6 +1974,32 @@ impl Pipeline {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_COMMON_UNCLE") {
+            eprintln!(
+                "COMMON_UNCLE_RUST scope={:?} parent={:?} exact={:?} groups={:?}",
+                scope.map(|node| self.graph.nodes[node.0 as usize].tala_id),
+                parent_scope.map(|node| self.graph.nodes[node.0 as usize].tala_id),
+                children_by_exact_uncle
+                    .iter()
+                    .map(|(uncle, cousins)| (
+                        self.graph.nodes[uncle.0 as usize].tala_id,
+                        cousins
+                            .iter()
+                            .map(|node| self.graph.nodes[node.0 as usize].tala_id)
+                            .collect::<Vec<_>>(),
+                    ))
+                    .collect::<Vec<_>>(),
+                common_uncle_groups
+                    .iter()
+                    .map(|group| {
+                        group
+                            .iter()
+                            .map(|node| self.graph.nodes[node.0 as usize].tala_id)
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
         let edge_abduction_nodes = abducted_children
             .into_iter()
             .map(|child| old_to_new[&child])
@@ -4501,6 +4545,19 @@ impl Pipeline {
                 if let Some(projected) = directed.tree_routing_nodes.get(&NodeId(new_index as u32))
                     && let Some(tree) = scope.graph.tree_routing_nodes.get_mut(&old)
                 {
+                    if crate::engine::trace_env_enabled("WEFTAN_TRACE_TREE_ORIENT")
+                        && matches!(
+                            scope.graph.nodes[old.0 as usize].tala_id,
+                            1171112347 | 1154334728 | 1271778061 | 1187889966
+                        )
+                    {
+                        eprintln!(
+                            "TREE_ORIENT_DIRECT_RUST tala={} from={:?} to={:?}",
+                            scope.graph.nodes[old.0 as usize].tala_id,
+                            tree.orientation,
+                            projected.orientation
+                        );
+                    }
                     tree.orientation = projected.orientation;
                 }
             }

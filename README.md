@@ -77,21 +77,16 @@ oracle over the checked-in serialized corpus.
 
 | Measurement | Result |
 | --- | ---: |
-| Successful single-seed comparisons in the current baseline | **108 / 116 exact** |
-| Exact boxes across successful cases | **2,117 / 2,196** |
-| Exact routes across successful cases | **729 / 808** |
-| Exact edge labels across successful cases | **798 / 808** |
-| Exact node labels across successful cases | **2,190 / 2,196** |
-| Exact node icons across successful cases | **2,196 / 2,196** |
+| Successful single-seed comparisons in the current baseline | **120 / 120 exact** |
+| Exact boxes across successful cases | **2,964 / 2,964** |
+| Exact routes across successful cases | **974 / 974** |
+| Exact edge labels across successful cases | **974 / 974** |
+| Exact node labels across successful cases | **2,964 / 2,964** |
+| Exact node icons across successful cases | **2,964 / 2,964** |
 
-The baseline records oracle timeout and malformed-input cases separately.
-Simple, label-position, all-shapes, flipt, bipartite, and Twitter witnesses
-have byte-identical normalized traces; icon-position remains an explicit
-nested-placement divergence witness, and the five timeout or oracle-work-limit cases
-are recorded in
-[the dated measurement record](docs/tala-parity-baseline.json) and
-[status notes](docs/status.md). These are corpus measurements, not a claim
-that every possible D2 graph is identical.
+The baseline records the one large-grid work-limit case separately; both
+engines return the same error. These are corpus measurements, not a claim that
+every possible D2 graph is identical.
 
 ## Reproducible choices
 

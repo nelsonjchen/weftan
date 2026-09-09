@@ -281,6 +281,28 @@ pub(super) fn route_line(
     all_edge_indices: &[usize],
     routes: Option<&[Vec<Point>]>,
 ) -> Option<LineRoute> {
+    route_line_with_overlap_mode(graph, edge_index, all_edge_indices, routes, false)
+}
+
+/// RouteLine variant used by StraightEdgesFallback. The Go fallback evaluates
+/// a candidate against only the routes whose segments actually overlap it;
+/// ordinary route-line callers retain the recovered staged-search gate.
+pub(super) fn route_line_allow_matching_overlap(
+    graph: &ArenaGraph,
+    edge_index: usize,
+    all_edge_indices: &[usize],
+    routes: Option<&[Vec<Point>]>,
+) -> Option<LineRoute> {
+    route_line_with_overlap_mode(graph, edge_index, all_edge_indices, routes, true)
+}
+
+fn route_line_with_overlap_mode(
+    graph: &ArenaGraph,
+    edge_index: usize,
+    all_edge_indices: &[usize],
+    routes: Option<&[Vec<Point>]>,
+    allow_matching_overlap: bool,
+) -> Option<LineRoute> {
     let edge = &graph.edges[edge_index];
     let source_rect = node_rect(graph, edge.from)?;
     let target_rect = node_rect(graph, edge.to)?;
@@ -303,6 +325,21 @@ pub(super) fn route_line(
                         graph.nodes[edge.to.0 as usize].tala_id
                     )
         });
+    if crate::engine::trace_env_enabled("WEFTAN_TRACE_ROUTE_LINE")
+        && (trace_candidates
+            || crate::engine::trace_env_value("WEFTAN_TRACE_ROUTE_LINE").as_deref() == Some("all"))
+    {
+        eprintln!(
+            "ROUTE_LINE_START edge={} from={}>{} source_orientation={:?} target_orientation={:?} source_ports={} target_ports={}",
+            edge_index,
+            graph.nodes[edge.from.0 as usize].tala_id,
+            graph.nodes[edge.to.0 as usize].tala_id,
+            source_orientation,
+            target_orientation,
+            source_ports.len(),
+            target_ports.len()
+        );
+    }
 
     let mut occupied = BTreeMap::<(NodeId, u64, u64), Vec<usize>>::new();
     for &other_index in all_edge_indices {
@@ -428,16 +465,21 @@ pub(super) fn route_line(
                         })
                 })
                 .collect::<Vec<_>>();
-            // Recovered Graph.RouteLine uses the overlap set only as a gate.
-            // Once any segment overlaps, edgeCanOverlapEdges receives the
-            // complete allEdges-with-current-filtered slice.
             let all_other_edges = all_edge_indices
                 .iter()
                 .copied()
                 .filter(|other_index| *other_index != edge_index)
                 .collect::<Vec<_>>();
+            let overlap_edges = if allow_matching_overlap {
+                &overlapping_edges
+            } else {
+                // The ordinary recovered route-line path keeps the full
+                // staged topology as its overlap gate. StraightEdgesFallback
+                // opts into the Go candidate-only behavior above.
+                &all_other_edges
+            };
             if !overlapping_edges.is_empty()
-                && !edges_can_overlap_all(graph, edge_index, &all_other_edges)
+                && !edges_can_overlap_all(graph, edge_index, overlap_edges)
             {
                 if trace_candidates {
                     eprintln!(

@@ -153,7 +153,9 @@ pub(in crate::engine) fn try_straight_edge_fallback(graph: &mut ArenaGraph, edge
     let all_edge_indices = (0..graph.edges.len()).collect::<Vec<_>>();
     let edge = &graph.edges[edge_index];
     let original_cost = estimated_edge_cost(graph, edge_index, &edge.points);
-    let Some(line) = route_line::route_line(graph, edge_index, &all_edge_indices, None) else {
+    let Some(line) =
+        route_line::route_line_allow_matching_overlap(graph, edge_index, &all_edge_indices, None)
+    else {
         return;
     };
     let mut line_cost = line.cost;
@@ -165,7 +167,29 @@ pub(in crate::engine) fn try_straight_edge_fallback(graph: &mut ArenaGraph, edge
             line_cost *= 0.25;
         }
     }
+    if crate::engine::trace_env_enabled("WEFTAN_TRACE_STRAIGHT_EDGE") {
+        eprintln!(
+            "STRAIGHT_RUST edge={} from={} to={} original={:.17e} line={:.17e} points={:?} line_points={:?}",
+            edge_index,
+            graph.nodes[edge.from.0 as usize].tala_id,
+            graph.nodes[edge.to.0 as usize].tala_id,
+            original_cost,
+            line_cost,
+            edge.points,
+            vec![line.source.point, line.target.point]
+        );
+    }
     if line_cost < original_cost {
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_STRAIGHT_EDGE") {
+            eprintln!(
+                "STRAIGHT_REPLACE_RUST edge={} from={} to={} original={:.17e} line={:.17e}",
+                edge_index,
+                graph.nodes[edge.from.0 as usize].tala_id,
+                graph.nodes[edge.to.0 as usize].tala_id,
+                original_cost,
+                line_cost
+            );
+        }
         graph.edges[edge_index].points = vec![line.source.point, line.target.point];
     }
 }

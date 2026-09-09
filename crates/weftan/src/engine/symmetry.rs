@@ -213,7 +213,6 @@ impl ArenaGraph {
 
         let position = self.equidistance_position(node);
         let size = self.active_node_size(node);
-        let aggregate_geometry_tie = is_aggregate && self.active_node_container(node).is_some();
         // TALA scans Node.Edges in its serialized insertion order. For an
         // ordinary endpoint the live slice retains that order; after an
         // aggregate rewrite, the live slice is grouped by temporary vessel
@@ -457,7 +456,11 @@ impl ArenaGraph {
         // into the owning Graph.Nodes.  Go's subsequent edgeLength scan sees
         // those restored siblings in its obstruction inventory, so use the
         // post-restoration scoring mode for both the baseline and trials.
+        let trace_node_id = self.nodes[node.0 as usize].tala_id;
         let original_length = self.global_sized_edge_length_after_tree_restoration(true);
+        if crate::engine::trace_env_enabled("WEFTAN_TRACE_EQUIDISTANCE") {
+            eprintln!("EQ_EDGE_BEGIN_RUST node={} label=original", trace_node_id);
+        }
         if crate::engine::trace_env_enabled("WEFTAN_TRACE_EQ_ENTRY")
             && self.nodes[node.0 as usize].tala_id == 2691723441
         {
@@ -486,7 +489,6 @@ impl ArenaGraph {
         }
         let existing_overlaps = self.existing_overlap_pairs();
         let existing_exact_overlaps = self.exact_overlap_pairs();
-        let trace_node_id = self.nodes[node.0 as usize].tala_id;
         let score_move = |graph: &mut Self, moved: &[NodeId]| -> Option<f64> {
             let original = graph.clone();
             // TALA records AffectContainers when the transaction is created.
@@ -551,22 +553,11 @@ impl ArenaGraph {
                 );
             }
             let score = valid.then(|| graph.global_sized_edge_length_after_tree_restoration(true));
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_EQUIDISTANCE") {
+                eprintln!("EQ_EDGE_BEGIN_RUST node={} label=trial", trace_node_id);
+            }
             *graph = original;
-            score.filter(|score| {
-                // Aggregate vessel positions are scored by TALA against a
-                // temporary pointer-shared vessel. The stable arena's
-                // materialized edge scorer can differ by a sub-pixel term
-                // while the candidate is still the same midpoint move; keep
-                // the recovered geometry decision when the trial is valid.
-                // A container-owned aggregate-vessel EdgeLength is evaluated
-                // against the temporary Go pointer graph. The stable arena
-                // retains those members and can report a larger absolute term
-                // even when the vessel move is an accepted midpoint tie in
-                // TALA. Keep the recovered geometry decision for that scope;
-                // ordinary and root-level aggregate nodes retain precision
-                // comparison.
-                (aggregate_geometry_tie || *score <= original_length + PRECISION) && *score != 0.0
-            })
+            score.filter(|score| *score <= original_length + PRECISION && *score != 0.0)
         };
         let solo_score = score_move(self, &[container]);
         let mut connected_nodes = other_connected;

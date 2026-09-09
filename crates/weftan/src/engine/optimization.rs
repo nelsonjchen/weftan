@@ -621,6 +621,21 @@ impl ArenaGraph {
             && ((mirror_x && tree.orientation.is_horizontal())
                 || (mirror_y && tree.orientation.is_vertical()))
         {
+            if crate::engine::trace_env_enabled("WEFTAN_TRACE_TREE_ORIENT")
+                && matches!(
+                    self.nodes[node.0 as usize].tala_id,
+                    1171112347 | 1154334728 | 1271778061 | 1187889966
+                )
+            {
+                eprintln!(
+                    "TREE_ORIENT_MIRROR_RUST tala={} from={:?} to={:?} mirror=({}, {})",
+                    self.nodes[node.0 as usize].tala_id,
+                    tree.orientation,
+                    tree.orientation.opposite(),
+                    mirror_x,
+                    mirror_y
+                );
+            }
             tree.orientation = tree.orientation.opposite();
         }
     }
@@ -966,12 +981,10 @@ impl ArenaGraph {
             }
             self.nodes[index].position = Some(position);
             self.nodes[index].rect.origin = position;
-            if let Some(tree) = self.tree_routing_nodes.get_mut(&node)
-                && ((mirror_x && tree.orientation.is_horizontal())
-                    || (mirror_y && tree.orientation.is_vertical()))
-            {
-                tree.orientation = tree.orientation.opposite();
-            }
+            // The route tree carrier is a separate projection from the node
+            // pointer mirrored by Graph.mirrorAxes. Keep its orientation in
+            // the pre-mirror frame; the OSS router observes that carrier when
+            // it constructs sentinel routes after the mirror transaction.
         }
     }
 
@@ -1073,12 +1086,8 @@ impl ArenaGraph {
             }
             self.nodes[index].position = Some(position);
             self.nodes[index].rect.origin = position;
-            if let Some(tree) = self.tree_routing_nodes.get_mut(&descendant)
-                && ((mirror_x && tree.orientation.is_horizontal())
-                    || (mirror_y && tree.orientation.is_vertical()))
-            {
-                tree.orientation = tree.orientation.opposite();
-            }
+            // Preserve the routing carrier orientation for the same reason as
+            // mirror_stable_node_box above.
         }
     }
 
